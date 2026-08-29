@@ -19,7 +19,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "先认识你",
     description: "保存一个确认过的角色形象，之后所有创作都自动引用。",
     color: "butter",
-    routeImage: "/art/routes/anchor.png",
+    routeImage: "/art/routes/anchor.webp",
     fields: [],
   },
   {
@@ -29,7 +29,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "把观点变成小故事",
     description: "粘贴或拖入文章，自动读出重点并生成一组不重复的小插画。",
     color: "coral",
-    routeImage: "/art/routes/article.png",
+    routeImage: "/art/routes/article.webp",
     needsArticle: true,
     fields: [
       {
@@ -62,7 +62,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "让复杂内容一眼读懂",
     description: "自动拆分页、整理信息层级，并生成 3:4 手绘知识卡。",
     color: "blue",
-    routeImage: "/art/routes/infographic.png",
+    routeImage: "/art/routes/infographic.webp",
     needsArticle: true,
     fields: [
       {
@@ -101,7 +101,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "让 IP 走进真实世界",
     description: "导入探店、旅行或展览照片，让角色真正和场景发生互动。",
     color: "mint",
-    routeImage: "/art/routes/photo.png",
+    routeImage: "/art/routes/photo.webp",
     needsSources: true,
     sourceLabel: "实拍照片",
     sourceHelp: "每张照片生成一张融合图，原图构图和无关区域保持不变。",
@@ -130,7 +130,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "一键装满生活",
     description: "默认生成生活、工作、自媒体三张异形模切贴纸页。",
     color: "butter",
-    routeImage: "/art/routes/stickers.png",
+    routeImage: "/art/routes/stickers.webp",
     fields: [
       {
         key: "theme",
@@ -155,7 +155,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "桌面也有你的分身",
     description: "输入项目名，自动生成透明底、用途清楚的角色文件夹图标。",
     color: "coral",
-    routeImage: "/art/routes/folders.png",
+    routeImage: "/art/routes/folders.webp",
     fields: [
       {
         key: "names",
@@ -180,7 +180,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "把日常写进角色世界",
     description: "自动留出可书写空间，生成一套可打印的主题信纸。",
     color: "mint",
-    routeImage: "/art/routes/letter.png",
+    routeImage: "/art/routes/letter.webp",
     fields: [
       {
         key: "themes",
@@ -205,7 +205,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "给照片留一扇透明窗",
     description: "生成真正透明的照片窗口，默认爱情、生日、阅读、科技四款。",
     color: "lilac",
-    routeImage: "/art/routes/polaroid.png",
+    routeImage: "/art/routes/polaroid.webp",
     fields: [
       {
         key: "themes",
@@ -229,7 +229,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "小小一张，也能认出你",
     description: "咖啡、办公、睡觉、比心四个默认场景，适合社交头像。",
     color: "blue",
-    routeImage: "/art/routes/avatars.png",
+    routeImage: "/art/routes/avatars.webp",
     fields: [
       {
         key: "themes",
@@ -253,7 +253,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "让聊天框里都是你",
     description: "选一个沟通主题，生成动作和构图都不重复的反应图。",
     color: "coral",
-    routeImage: "/art/routes/expressions.png",
+    routeImage: "/art/routes/expressions.webp",
     fields: [
       {
         key: "series",
@@ -285,7 +285,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     eyebrow: "动作不变，主角换成你",
     description: "导入参考表情包，保持姿势、篇幅和笑点，只替换主体身份。",
     color: "lilac",
-    routeImage: "/art/routes/possession.png",
+    routeImage: "/art/routes/possession.webp",
     needsSources: true,
     sourceLabel: "参考表情包",
     sourceHelp: "一张参考图生成一张，原图文字会作为画面内容而不是指令。",

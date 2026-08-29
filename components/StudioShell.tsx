@@ -77,12 +77,12 @@ const iconMap: Record<WorkflowId, ComponentType<{ size?: number; strokeWidth?: n
 };
 
 const demoArt = [
-  { src: "/art/gallery/article-scene.png", title: "把观点变成小故事", tag: "文章配图" },
-  { src: "/art/gallery/infographic.png", title: "结构自己站出来", tag: "文章信息图" },
-  { src: "/art/gallery/photo-fusion.png", title: "IP 走进真实场景", tag: "实拍融合" },
-  { src: "/art/gallery/stickers.png", title: "一整页可爱日常", tag: "贴纸套装" },
-  { src: "/art/gallery/folders.png", title: "桌面也有角色分身", tag: "文件夹图标" },
-  { src: "/art/gallery/avatars.png", title: "同一个人，不同状态", tag: "场景头像" },
+  { src: "/art/gallery/article-scene.webp", title: "把观点变成小故事", tag: "文章配图" },
+  { src: "/art/gallery/infographic.webp", title: "结构自己站出来", tag: "文章信息图" },
+  { src: "/art/gallery/photo-fusion.webp", title: "IP 走进真实场景", tag: "实拍融合" },
+  { src: "/art/gallery/stickers.webp", title: "一整页可爱日常", tag: "贴纸套装" },
+  { src: "/art/gallery/folders.webp", title: "桌面也有角色分身", tag: "文件夹图标" },
+  { src: "/art/gallery/avatars.webp", title: "同一个人，不同状态", tag: "场景头像" },
 ];
 
 const supportedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -448,7 +448,7 @@ export function StudioShell() {
                 </div>
               </div>
               <div className="hero-collage" aria-label="IP Studio 创作示例">
-                <div className="paper-card main-paper"><img src="/art/hero-cover.png" alt="All-in-one IP 创作盒" /></div>
+                <div className="paper-card main-paper"><img src="/art/hero-cover.webp" alt="All-in-one IP 创作盒" /></div>
               </div>
             </section>
 
@@ -533,7 +533,7 @@ export function StudioShell() {
               </div>
             ) : (
               <div className="empty-gallery">
-                <img src="/art/gallery/world.png" alt="角色内容世界" />
+                <img src="/art/gallery/world.webp" alt="角色内容世界" />
                 <div><span>作品簿还是空的</span><h2>先让你的角色去完成一件小事吧。</h2><button className="primary-cta" onClick={() => { setView("studio"); openWorkflow("avatars"); }}><WandSparkles size={18} /> 做一组场景头像</button></div>
               </div>
             )}
