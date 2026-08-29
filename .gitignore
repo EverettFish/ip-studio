@@ -1,0 +1,12 @@
+node_modules/
+node_modules.pre-sites/
+package-lock.pre-sites.json
+.next/
+.vinext/
+dist/
+out/
+.wrangler/
+.env*
+!.env.example
+npm-debug.log*
+*.tsbuildinfo
