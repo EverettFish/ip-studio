@@ -5,6 +5,7 @@ package-lock.pre-sites.json
 .vinext/
 dist/
 out/
+standalone/
 .wrangler/
 .env*
 !.env.example
