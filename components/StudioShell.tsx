@@ -61,6 +61,15 @@ import {
   saveAnchor,
   saveArtwork,
 } from "@/lib/db";
+import {
+  browserApiError,
+  forgetApiKey,
+  generateBrowserImage,
+  planBrowserJobs,
+  rememberApiKey,
+  restoreApiKey,
+  validateBrowserApiKey,
+} from "@/lib/browser-openai";
 
 const iconMap: Record<WorkflowId, ComponentType<{ size?: number; strokeWidth?: number }>> = {
   anchor: UserRound,
@@ -152,7 +161,7 @@ export function StudioShell() {
   const [mobileNav, setMobileNav] = useState(false);
   const [anchor, setAnchor] = useState<AnchorRecord>();
   const [artworks, setArtworks] = useState<ArtworkRecord[]>([]);
-  const [connected, setConnected] = useState(false);
+  const [apiKey, setApiKey] = useState("");
   const [apiOpen, setApiOpen] = useState(false);
   const [anchorOpen, setAnchorOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -168,6 +177,7 @@ export function StudioShell() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const anchorUrl = useBlobUrl(anchor?.blob);
+  const connected = Boolean(apiKey);
 
   const active = workflowMap[activeId];
   const activeConfig = configByRoute[activeId];
@@ -190,14 +200,10 @@ export function StudioShell() {
   }, [active, activeConfig, activeId, sourceFiles.length]);
 
   useEffect(() => {
-    void Promise.all([
-      getAnchor(),
-      listArtworks(),
-      fetch("/api/session").then((response) => response.json() as Promise<{ connected: boolean }>),
-    ]).then(([storedAnchor, storedArtworks, session]) => {
+    setApiKey(restoreApiKey());
+    void Promise.all([getAnchor(), listArtworks()]).then(([storedAnchor, storedArtworks]) => {
       setAnchor(storedAnchor);
       setArtworks(storedArtworks);
-      setConnected(session.connected);
     });
   }, []);
 
@@ -288,31 +294,19 @@ export function StudioShell() {
     if (activeId !== "article" && activeId !== "infographic") {
       return buildStaticJobs(activeId, activeConfig, sourceFiles.length);
     }
-    const form = new FormData();
-    form.append("workflow", activeId);
-    form.append("article", article);
-    form.append("config", JSON.stringify(activeConfig));
-    const response = await fetch("/api/plan", { method: "POST", body: form });
-    const payload = (await response.json()) as { jobs?: GenerationJob[]; error?: string };
-    if (!response.ok || !payload.jobs) throw new Error(payload.error || "内容规划失败。");
-    return payload.jobs;
+    return planBrowserJobs({ apiKey, workflow: activeId, article, config: activeConfig });
   }
 
   async function generateOne(target: GenerationJob): Promise<string> {
     if (!anchor) throw new Error("请先上传角色锚点。");
-    const form = new FormData();
-    form.append("prompt", target.prompt);
-    form.append("size", target.size);
-    form.append("quality", quality);
-    form.append("background", target.background);
-    form.append("anchor", new File([anchor.blob], anchor.name, { type: anchor.blob.type || "image/png" }));
-    if (typeof target.sourceIndex === "number" && sourceFiles[target.sourceIndex]) {
-      form.append("sources", sourceFiles[target.sourceIndex]);
-    }
-    const response = await fetch("/api/generate", { method: "POST", body: form });
-    const payload = (await response.json()) as { image?: string; error?: string };
-    if (!response.ok || !payload.image) throw new Error(payload.error || "生成失败。");
-    return payload.image;
+    if (!apiKey) throw new Error("请先连接 API Key。");
+    return generateBrowserImage({
+      apiKey,
+      anchor,
+      job: target,
+      quality,
+      source: typeof target.sourceIndex === "number" ? sourceFiles[target.sourceIndex] : undefined,
+    });
   }
 
   async function startGeneration() {
@@ -357,14 +351,14 @@ export function StudioShell() {
           });
           setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image } : item));
         } catch (error) {
-          const message = error instanceof Error ? error.message : "这一张生成失败。";
+          const message = browserApiError(error);
           setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: message } : item));
         }
       }
       setArtworks(await listArtworks());
       setNotice("这一轮已经完成。失败的单张可以直接重试，成功作品已留在本机作品簿。");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "没有完成这轮创作，请稍后重试。");
+      setNotice(browserApiError(error));
     } finally {
       setBusy(false);
     }
@@ -379,7 +373,7 @@ export function StudioShell() {
       setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image } : item));
       setArtworks(await listArtworks());
     } catch (error) {
-      setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: error instanceof Error ? error.message : "重试失败" } : item));
+      setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: browserApiError(error) } : item));
     }
   }
 
@@ -697,7 +691,7 @@ export function StudioShell() {
         </div>
       )}
 
-      {apiOpen && <ApiKeyModal connected={connected} onClose={() => setApiOpen(false)} onConnected={setConnected} />}
+      {apiOpen && <ApiKeyModal connected={connected} onClose={() => setApiOpen(false)} onConnect={(value) => { rememberApiKey(value); setApiKey(value); }} onDisconnect={() => { forgetApiKey(); setApiKey(""); }} />}
       {anchorOpen && (
         <div className="modal-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) setAnchorOpen(false); }}>
           <div className="paper-modal anchor-modal">
@@ -723,7 +717,7 @@ export function StudioShell() {
   );
 }
 
-function ApiKeyModal({ connected, onClose, onConnected }: { connected: boolean; onClose: () => void; onConnected: (value: boolean) => void }) {
+function ApiKeyModal({ connected, onClose, onConnect, onDisconnect }: { connected: boolean; onClose: () => void; onConnect: (value: string) => void; onDisconnect: () => void }) {
   const [apiKey, setApiKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -733,22 +727,19 @@ function ApiKeyModal({ connected, onClose, onConnected }: { connected: boolean; 
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey }) });
-      const payload = (await response.json()) as { connected?: boolean; error?: string };
-      if (!response.ok) throw new Error(payload.error || "连接失败");
-      onConnected(true);
+      await validateBrowserApiKey(apiKey.trim());
+      onConnect(apiKey.trim());
       setApiKey("");
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "连接失败，请检查后重试。");
+      setError(browserApiError(cause));
     } finally {
       setLoading(false);
     }
   }
 
-  async function disconnect() {
-    await fetch("/api/session", { method: "DELETE" });
-    onConnected(false);
+  function disconnect() {
+    onDisconnect();
     onClose();
   }
 
@@ -759,7 +750,7 @@ function ApiKeyModal({ connected, onClose, onConnected }: { connected: boolean; 
         <div className="key-illustration"><div><KeyRound size={30} /></div><span>••••••••••••</span></div>
         <div className="modal-kicker"><ShieldCheck size={18} /> 你的额度，你做主</div>
         <h2>{connected ? "API Key 已安全连接" : "连接你的 OpenAI API Key"}</h2>
-        <p>Key 通过本站服务端验证，并加密写入 HttpOnly 会话；不会保存到数据库，也不会出现在生成日志里。会话 8 小时后自动失效。</p>
+        <p>为了完全脱离 ChatGPT Sites，Key 现在由这个标签页直接连接 OpenAI，只保存在当前标签页会话中，8 小时后或关闭标签页时自动失效。请只在私人设备使用，不要共享这个标签页。</p>
         {!connected ? (
           <>
             <label className="key-field"><span>OpenAI API Key</span><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /><small><ShieldCheck size={13} /> 生成消耗直接记在你的 OpenAI 账户</small></label>
@@ -767,7 +758,7 @@ function ApiKeyModal({ connected, onClose, onConnected }: { connected: boolean; 
             <button className="modal-primary" disabled={loading || apiKey.length < 20}>{loading ? <><LoaderCircle className="spin" size={17} /> 正在验证</> : "连接并验证"}</button>
           </>
         ) : (
-          <><div className="connected-panel"><Check size={20} /><div><strong>连接正常</strong><span>现在可以直接开始生成</span></div></div><button className="modal-primary" type="button" onClick={onClose}>继续创作</button><button className="disconnect-button" type="button" onClick={() => void disconnect()}>断开当前 Key</button></>
+          <><div className="connected-panel"><Check size={20} /><div><strong>连接正常</strong><span>Key 仅保留在当前标签页会话</span></div></div><button className="modal-primary" type="button" onClick={onClose}>继续创作</button><button className="disconnect-button" type="button" onClick={disconnect}>断开当前 Key</button></>
         )}
       </form>
     </div>

@@ -9,7 +9,7 @@
 3. 启动开发环境：`npm run dev`
 4. 打开 `http://localhost:3000`
 
-用户的 OpenAI API Key 不写入环境变量或数据库。连接后，服务端把它加密写入 HttpOnly 会话 Cookie，8 小时后自动失效。角色锚点和作品存入当前浏览器的 IndexedDB。
+网站使用纯静态托管，不依赖 ChatGPT Sites。用户的 OpenAI API Key 不写入代码、仓库、URL 或数据库，只保存在当前标签页的 `sessionStorage`，8 小时、关闭标签页或主动断开后失效。浏览器会用该 Key 直接请求 OpenAI API；角色锚点和作品保存在当前浏览器的 IndexedDB。
 
 ## 支持的功能
 

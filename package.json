@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vinext dev",
-    "build": "vinext build",
-    "start": "vinext start",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next dev",
     "lint": "eslint .",
     "test": "vitest run"
   },
@@ -21,21 +21,12 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
-    "@cloudflare/workers-types": "4.20260515.1",
-    "@openai/sites-vite-plugin": "0.2.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.3.3",
-    "react-server-dom-webpack": "19.2.6",
     "typescript": "^5.9.0",
-    "vinext": "1.0.0-beta.3",
-    "vite": "8.0.13",
-    "vitest": "4.1.11",
-    "wrangler": "4.92.0"
+    "vitest": "4.1.11"
   }
 }

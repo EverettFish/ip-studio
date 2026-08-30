@@ -9,6 +9,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
+      <head>
+        <meta
+          httpEquiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.openai.com; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:"
+        />
+        <meta name="referrer" content="no-referrer" />
+      </head>
       <body>{children}</body>
     </html>
   );
