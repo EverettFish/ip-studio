@@ -14,6 +14,8 @@ export type WorkflowId =
 export type ConfigValue = string | number | boolean;
 export type WorkflowConfig = Record<string, ConfigValue>;
 
+export type AnchorStyleMode = "mengli" | "preserve";
+
 export type FieldOption = { label: string; value: string };
 
 export type FieldDefinition = {
@@ -63,6 +65,7 @@ export type AnchorRecord = {
   id: "primary";
   name: string;
   blob: Blob;
+  styleMode?: AnchorStyleMode;
   updatedAt: number;
 };
 

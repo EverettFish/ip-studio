@@ -38,6 +38,7 @@ import { useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import type {
   AnchorRecord,
+  AnchorStyleMode,
   ArtworkRecord,
   GenerationJob,
   JobState,
@@ -45,6 +46,7 @@ import type {
   WorkflowId,
 } from "@/lib/types";
 import {
+  anchorStyleInstruction,
   buildStaticJobs,
   defaultConfig,
   estimateCount,
@@ -119,6 +121,7 @@ export function StudioShell() {
   const [view, setView] = useState<"studio" | "gallery">("studio");
   const [mobileNav, setMobileNav] = useState(false);
   const [anchor, setAnchor] = useState<AnchorRecord>();
+  const [anchorStyleMode, setAnchorStyleMode] = useState<AnchorStyleMode>("mengli");
   const [artworks, setArtworks] = useState<ArtworkRecord[]>([]);
   const [connected, setConnected] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
@@ -140,6 +143,22 @@ export function StudioShell() {
   const active = workflowMap[activeId];
   const activeConfig = configByRoute[activeId];
   const estimatedCount = estimateCount(activeId, activeConfig, sourceFiles.length);
+  const hasPrimaryInput = Boolean(active.needsArticle || active.needsSources);
+  const configStep = hasPrimaryInput ? 2 : 1;
+  const previewStep = hasPrimaryInput ? 3 : 2;
+  const outputPreviewTitles = useMemo(() => {
+    if (activeId === "article") {
+      return Array.from({ length: Number(activeConfig.count || 5) }, (_, index) => `文章配图 ${index + 1} · 生成时按内容命名`);
+    }
+    if (activeId === "infographic") {
+      if (activeConfig.pages === "auto") return ["信息图页数与标题 · 根据文章自动判断"];
+      return Array.from({ length: Number(activeConfig.pages || 1) }, (_, index) => `文章信息图 ${index + 1} · 生成时按内容命名`);
+    }
+    if (active.needsSources && sourceFiles.length === 0) {
+      return [`添加${active.sourceLabel || "参考图"}后，将按文件逐张命名`];
+    }
+    return buildStaticJobs(activeId, activeConfig, sourceFiles.length).map((item) => item.title);
+  }, [active, activeConfig, activeId, sourceFiles.length]);
 
   useEffect(() => {
     void Promise.all([
@@ -148,6 +167,7 @@ export function StudioShell() {
       fetch("/api/session").then((response) => response.json() as Promise<{ connected: boolean }>),
     ]).then(([storedAnchor, storedArtworks, session]) => {
       setAnchor(storedAnchor);
+      setAnchorStyleMode(storedAnchor?.styleMode || "mengli");
       setArtworks(storedArtworks);
       setConnected(session.connected);
     });
@@ -169,6 +189,7 @@ export function StudioShell() {
   }
 
   function updateConfig(key: string, value: string | number | boolean) {
+    if (!busy) setJobs([]);
     setConfigByRoute((current) => ({
       ...current,
       [activeId]: { ...current[activeId], [key]: value },
@@ -189,6 +210,7 @@ export function StudioShell() {
       id: "primary",
       name: file.name,
       blob: file,
+      styleMode: anchorStyleMode,
       updatedAt: Date.now(),
     };
     await saveAnchor(record);
@@ -200,6 +222,15 @@ export function StudioShell() {
     await removeAnchor();
     setAnchor(undefined);
     setNotice("已移除本机角色锚点。");
+  }
+
+  async function changeAnchorStyleMode(mode: AnchorStyleMode) {
+    setAnchorStyleMode(mode);
+    if (!anchor) return;
+    const next = { ...anchor, styleMode: mode };
+    await saveAnchor(next);
+    setAnchor(next);
+    setNotice(mode === "mengli" ? "角色会保留身份特征，并统一转为萌粒风。" : "角色会保留锚点原画风，不做萌粒化转换。");
   }
 
   async function importArticle(file?: File) {
@@ -252,7 +283,7 @@ export function StudioShell() {
   async function generateOne(target: GenerationJob): Promise<string> {
     if (!anchor) throw new Error("请先上传角色锚点。");
     const form = new FormData();
-    form.append("prompt", target.prompt);
+    form.append("prompt", `${anchorStyleInstruction(anchor.styleMode || anchorStyleMode)}\n\n${target.prompt}`);
     form.append("size", target.size);
     form.append("quality", quality);
     form.append("background", target.background);
@@ -553,7 +584,7 @@ export function StudioShell() {
             <div className="drawer-body">
               <section className="mini-anchor-row">
                 <div className="mini-anchor-preview">{anchorUrl ? <img src={anchorUrl} alt="角色锚点" /> : <UserRound size={24} />}</div>
-                <div><small>本次主角</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
+                <div><small>本次主角 · {anchorStyleMode === "mengli" ? "转为萌粒风" : "保持原画风"}</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
                 <button onClick={() => setAnchorOpen(true)}>{anchor ? "更换" : "上传"}</button>
               </section>
 
@@ -582,19 +613,19 @@ export function StudioShell() {
               )}
 
               <section className="form-section">
-                <div className="form-title"><b>{active.needsArticle || active.needsSources ? "2" : "1"}</b><div><strong>回答几个小问题</strong><small>没有特别要求，保持默认就可以直接生成</small></div></div>
+                <div className="form-title"><b>{configStep}</b><div><strong>回答几个小问题</strong><small>修改任一输入，下方输出名称和数量会立即同步</small></div></div>
                 <div className="field-grid">
                   {active.fields.map((field) => (
                     <label className={field.kind === "textarea" ? "wide-field" : ""} key={field.key}>
                       <span>{field.label}</span>
                       {field.kind === "select" ? (
-                        <select value={String(activeConfig[field.key])} onChange={(event) => updateConfig(field.key, event.target.value)}>
+                        <select value={String(activeConfig[field.key] ?? field.defaultValue)} onChange={(event) => updateConfig(field.key, event.target.value)}>
                           {field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
                         </select>
                       ) : field.kind === "textarea" ? (
-                        <textarea value={String(activeConfig[field.key])} placeholder={field.placeholder} onChange={(event) => updateConfig(field.key, event.target.value)} />
+                        <textarea value={String(activeConfig[field.key] ?? field.defaultValue)} placeholder={field.placeholder} onChange={(event) => updateConfig(field.key, event.target.value)} />
                       ) : (
-                        <input type={field.kind === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(activeConfig[field.key])} placeholder={field.placeholder} onChange={(event) => updateConfig(field.key, field.kind === "number" ? Number(event.target.value) : event.target.value)} />
+                        <input type={field.kind === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(activeConfig[field.key] ?? field.defaultValue)} placeholder={field.placeholder} onChange={(event) => updateConfig(field.key, field.kind === "number" ? Number(event.target.value) : event.target.value)} />
                       )}
                       {field.help && <small>{field.help}</small>}
                     </label>
@@ -606,6 +637,13 @@ export function StudioShell() {
                 <div><strong>出图质量</strong><small>中等适合预览，高等适合交付</small></div>
                 <div className="segmented">
                   {(["low", "medium", "high"] as const).map((value) => <button key={value} className={quality === value ? "active" : ""} onClick={() => setQuality(value)}>{value === "low" ? "草稿" : value === "medium" ? "标准" : "精细"}</button>)}
+                </div>
+              </section>
+
+              <section className="form-section output-plan">
+                <div className="form-title"><b>{previewStep}</b><div><strong>核对本轮输出</strong><small>这里的名称会用于任务卡、作品簿和下载文件</small></div></div>
+                <div className="output-title-list">
+                  {outputPreviewTitles.map((title, index) => <span key={`${title}-${index}`}><b>{String(index + 1).padStart(2, "0")}</b>{title}</span>)}
                 </div>
               </section>
 
@@ -653,6 +691,17 @@ export function StudioShell() {
               <input type="file" accept="image/*" onChange={(event) => void handleAnchorFile(event.target.files?.[0])} />
             </label>
             {anchor && <div className="current-anchor-meta"><div><Check size={15} /><span><strong>{anchor.name}</strong><small>{new Date(anchor.updatedAt).toLocaleString("zh-CN")} 保存</small></span></div><button onClick={() => void deleteAnchor()}><Trash2 size={15} /> 移除</button></div>}
+            <div className="anchor-style-choice">
+              <div><strong>角色输出画风</strong><small>只改变绘制方式，不改变发型、五官、服装和标志配色。</small></div>
+              <div className="anchor-style-options">
+                <button className={anchorStyleMode === "mengli" ? "active" : ""} type="button" onClick={() => void changeAnchorStyleMode("mengli")}>
+                  <span>转为萌粒风</span><small>Skill 默认 · 统一成手绘萌粒笔触</small>
+                </button>
+                <button className={anchorStyleMode === "preserve" ? "active" : ""} type="button" onClick={() => void changeAnchorStyleMode("preserve")}>
+                  <span>保持原画风</span><small>保留锚点原本的媒介和完成度</small>
+                </button>
+              </div>
+            </div>
             <div className="anchor-tips"><strong>更稳定的小诀窍</strong><span>完整头发或耳朵轮廓 · 标志性服装与配色 · 不要裁掉手脚 · 避免复杂场景</span></div>
             <button className="modal-primary" onClick={() => setAnchorOpen(false)} disabled={!anchor}>{anchor ? "就是这个角色" : "先上传一张图"}</button>
           </div>

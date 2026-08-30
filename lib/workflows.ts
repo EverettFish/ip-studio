@@ -1,4 +1,5 @@
 import type {
+  AnchorStyleMode,
   ConfigValue,
   GenerationJob,
   WorkflowConfig,
@@ -10,6 +11,19 @@ export const MENGLI_STYLE =
   "mini pen-doodle illustration, hesitant wobbly black pen contours with clearly visible irregular breaks, awkward hand-drawn shapes, internally clean flat color shapes deliberately slightly misregistered from selected outlines with tiny white slivers or small edge overhangs, normal clear saturation, limited color count, childlike messy-cute charm; broken but not uniformly dashed, misregistered but still legible";
 
 const identityHeader = `REFERENCE ROLES:\n- Image 1 is the accepted personal-IP anchor and is the only identity source. Preserve its complete hair or fur silhouette, face, body proportions, outfit, accessories, and signature palette.\n- Any later image is route content or composition reference only and must never override Image 1 identity.\n\nIDENTITY PRIORITY:\nThe accepted anchor overrides style, layout, source-character, and scene references. Keep the same recognizable IP in every output.`;
+
+export const DEFAULT_STICKER_THEMES = ["Life", "Work", "Media"];
+
+export function stickerThemes(config: WorkflowConfig): string[] {
+  return parseList(config.themes, DEFAULT_STICKER_THEMES).slice(0, 6);
+}
+
+export function anchorStyleInstruction(mode: AnchorStyleMode = "mengli"): string {
+  if (mode === "preserve") {
+    return `ANCHOR RENDERING MODE — PRESERVE ORIGINAL:\nKeep Image 1's original rendering medium, line quality, color treatment, and visual finish. Preserve the complete identity lock. If the route prompt mentions Mengli rendering for the character, this mode overrides that style conversion; retain only the requested composition and asset layout.`;
+  }
+  return `ANCHOR RENDERING MODE — CONVERT TO MENGLI:\nTranslate Image 1 into the Mengli mini pen-doodle rendering while preserving its complete identity lock: hair or fur silhouette, face, eyes, body proportions, outfit, accessories, and signature palette must not drift. Change mark-making only, never identity.`;
+}
 
 export const workflowDefinitions: WorkflowDefinition[] = [
   {
@@ -133,18 +147,20 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     routeImage: "/art/routes/stickers.webp",
     fields: [
       {
-        key: "theme",
-        label: "贴纸主题",
-        kind: "text",
-        defaultValue: "我的创作日常",
-        placeholder: "例如：研究生日常、咖啡店主理人",
+        key: "themes",
+        label: "每张贴纸页的标题",
+        kind: "textarea",
+        defaultValue: "Life\nWork\nMedia",
+        placeholder: "一行一个，例如：考研日常、旅行手账、咖啡时间",
+        help: "Life / Work / Media 只是默认值；改这里，下方输出标题会同步更新。",
       },
       {
         key: "copy",
-        label: "短句风格",
-        kind: "select",
-        defaultValue: "少量中文短句",
-        options: ["少量中文短句", "完全无文字", "网络感短句", "中英混合"].map((value) => ({ label: value, value })),
+        label: "贴纸正文（可选）",
+        kind: "textarea",
+        defaultValue: "",
+        placeholder: "一行一句；留空则除页眉标题外不加文字",
+        help: "只使用你写下的短句，不自动发明文案。",
       },
     ],
   },
@@ -368,7 +384,7 @@ export function estimateCount(
     case "possession":
       return sourceCount;
     case "stickers":
-      return 3;
+      return stickerThemes(config).length;
     case "folders":
       return parseList(config.names, ["灵感收集", "进行中", "已交付", "我的宝藏"]).length;
     case "letter":
@@ -404,16 +420,18 @@ export function buildStaticJobs(
   }
 
   if (workflowId === "stickers") {
-    return ["生活 Life", "工作 Work", "自媒体 Media"].map((set, index) =>
-      job(
+    const bodyText = parseList(config.copy, []);
+    return stickerThemes(config).map((theme, index) => {
+      const exactBodyText = bodyText.length ? bodyText.join(" | ") : "NONE";
+      return job(
         workflowId,
         index,
-        `${set} 贴纸页`,
-        `${identityHeader}\n\nCreate one transparent die-cut personal-IP sticker sheet for the ${set} set. Overall series theme: ${config.theme}. Copy mode: ${config.copy}. Make 9–12 distinct stickers with varied actions, crops, props, and silhouettes; keep every character unmistakably identical to Image 1. Dense but orderly layout, individual irregular white sticker borders, no overlaps or crops.\n\nSTYLE: ${MENGLI_STYLE}. Use only exact short copy appropriate to the requested copy mode; otherwise no text. Transparent outer background. No rectangular cards, repeated pose, extra character, logo, watermark, glossy 3D, or identity drift.`,
-        "1536x1024",
-        "transparent",
-      ),
-    );
+        `${theme} · 贴纸页`,
+        `${identityHeader}\n\nCreate one exact 3:4 portrait kiss-cut sticker sheet.\n\nTHEME AND HEADER TITLE EXACTLY:\n${theme}\n\nPAGE STRUCTURE:\n- Use two harmonious flat light-pastel zones derived from the accepted anchor palette.\n- Reserve only the top 12–16% for one full-width illustrated header block. Run one continuous lawn, meadow, or theme-equivalent ground edge to edge. Integrate one tiny accepted-IP scene directly into the header. The header is not a sticker: no white halo, cut border, floating contour, packaging hole, or separate panel around its title, character, or art.\n- Use the lower 84–88% as one uninterrupted, harmonizing, texture-free sticker field.\n\nBODY MANIFEST — EXACTLY 18 INDEPENDENT PIECES:\n1–3: three wide IP-led scene stickers; 4–8: five full-body or half-body IP actions; 9–12: four complete-hair or complete-fur heads, faces, or expressive busts; 13–18: six very small theme-specific filler stickerlets. Every large or medium piece must contain the IP. Standalone props are micro scale only.\n\nLAYOUT:\nCombined cut-border footprint 75–82%; two tidy visual rails with roughly equal side margins; calm staggered diagonal or S-curve rhythm; compact even breathing gaps; upper, middle, side, and lower areas occupied. Every body piece has its own continuous irregular white kiss-cut border, fully visible and separate. No touching, overlap, crop, straight rows, uniform columns, rigid grid, bottom prop strip, repeated oval blobs, large void, or glossy mockup.\n\nHOUSE STYLE:\n${MENGLI_STYLE}.\n\nBODY TEXT EXACTLY:\n${exactBodyText}\n\nDo not invent any other text. No logo, watermark, extra character, paper grain, 3D, rectangular UI card, or identity drift.`,
+        "1024x1536",
+        "opaque",
+      );
+    });
   }
 
   if (workflowId === "folders") {
