@@ -38,7 +38,6 @@ import { useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import type {
   AnchorRecord,
-  AnchorStyleMode,
   ArtworkRecord,
   GenerationJob,
   JobState,
@@ -46,7 +45,6 @@ import type {
   WorkflowId,
 } from "@/lib/types";
 import {
-  anchorStyleInstruction,
   buildStaticJobs,
   defaultConfig,
   estimateCount,
@@ -87,6 +85,16 @@ const demoArt = [
   { src: "/art/gallery/avatars.webp", title: "同一个人，不同状态", tag: "场景头像" },
 ];
 
+const studioCredits = [
+  { name: "EverettFish", role: "作者", avatar: "/credits/everettfish.webp", href: "https://xhslink.cn/o/foXMrwFgKD" },
+  { name: "OCunning_Lúc", role: "特别鸣谢", avatar: "/credits/ocunning-luc.webp", href: "https://xhslink.cn/o/4TKWMO7cn6Z" },
+  { name: "TATALAB", role: "特别鸣谢", avatar: "/credits/tatalab.webp", href: "https://xhslink.cn/o/5XBuJN9C1yr" },
+  { name: "摸鱼小李", role: "特别鸣谢", avatar: "/credits/moyu-xiaoli.webp", href: "https://xhslink.cn/o/9KKFHO3TH0r" },
+  { name: "是金三啊", role: "特别鸣谢", avatar: "/credits/shi-jinsan.webp", href: "https://xhslink.cn/o/92QGZ0jwD1u" },
+  { name: "水的离子积", role: "特别鸣谢", avatar: "/credits/shui-liziji.webp", href: "https://xhslink.cn/o/2rR7aTmN1P7" },
+  { name: "99m-AIGC", role: "特别鸣谢", avatar: "/credits/99m-aigc.webp", href: "https://xhslink.cn/o/9fdvobSWLjs" },
+];
+
 const supportedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function useBlobUrl(blob?: Blob) {
@@ -117,11 +125,32 @@ function SourceThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
   );
 }
 
+function CreditsMarquee() {
+  return (
+    <section className="credits-marquee" aria-label="IP Studio 作者与特别鸣谢">
+      <div className="credits-intro"><span>MADE WITH FRIENDS</span><strong>作者与特别鸣谢</strong></div>
+      <div className="credits-viewport">
+        <div className="credits-track">
+          {[0, 1].map((group) => (
+            <div className="credits-group" aria-hidden={group === 1} key={group}>
+              {studioCredits.map((person) => (
+                <a href={person.href} target="_blank" rel="noopener noreferrer" tabIndex={group === 1 ? -1 : undefined} className="credit-person" key={`${group}-${person.name}`}>
+                  <img src={person.avatar} alt="" />
+                  <span><small>{person.role}</small><strong>@{person.name}</strong></span>
+                </a>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function StudioShell() {
   const [view, setView] = useState<"studio" | "gallery">("studio");
   const [mobileNav, setMobileNav] = useState(false);
   const [anchor, setAnchor] = useState<AnchorRecord>();
-  const [anchorStyleMode, setAnchorStyleMode] = useState<AnchorStyleMode>("mengli");
   const [artworks, setArtworks] = useState<ArtworkRecord[]>([]);
   const [connected, setConnected] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
@@ -167,7 +196,6 @@ export function StudioShell() {
       fetch("/api/session").then((response) => response.json() as Promise<{ connected: boolean }>),
     ]).then(([storedAnchor, storedArtworks, session]) => {
       setAnchor(storedAnchor);
-      setAnchorStyleMode(storedAnchor?.styleMode || "mengli");
       setArtworks(storedArtworks);
       setConnected(session.connected);
     });
@@ -210,7 +238,6 @@ export function StudioShell() {
       id: "primary",
       name: file.name,
       blob: file,
-      styleMode: anchorStyleMode,
       updatedAt: Date.now(),
     };
     await saveAnchor(record);
@@ -222,15 +249,6 @@ export function StudioShell() {
     await removeAnchor();
     setAnchor(undefined);
     setNotice("已移除本机角色锚点。");
-  }
-
-  async function changeAnchorStyleMode(mode: AnchorStyleMode) {
-    setAnchorStyleMode(mode);
-    if (!anchor) return;
-    const next = { ...anchor, styleMode: mode };
-    await saveAnchor(next);
-    setAnchor(next);
-    setNotice(mode === "mengli" ? "角色会保留身份特征，并统一转为萌粒风。" : "角色会保留锚点原画风，不做萌粒化转换。");
   }
 
   async function importArticle(file?: File) {
@@ -262,7 +280,7 @@ export function StudioShell() {
     if (!files) return;
     const next = Array.from(files)
       .filter((file) => supportedImageTypes.has(file.type) && file.size <= 20 * 1024 * 1024)
-      .slice(0, 10 - sourceFiles.length);
+      .slice(0, 9 - sourceFiles.length);
     setSourceFiles((current) => [...current, ...next]);
   }
 
@@ -283,13 +301,13 @@ export function StudioShell() {
   async function generateOne(target: GenerationJob): Promise<string> {
     if (!anchor) throw new Error("请先上传角色锚点。");
     const form = new FormData();
-    form.append("prompt", `${anchorStyleInstruction(anchor.styleMode || anchorStyleMode)}\n\n${target.prompt}`);
+    form.append("prompt", target.prompt);
     form.append("size", target.size);
     form.append("quality", quality);
     form.append("background", target.background);
-    form.append("images", new File([anchor.blob], anchor.name, { type: anchor.blob.type || "image/png" }));
+    form.append("anchor", new File([anchor.blob], anchor.name, { type: anchor.blob.type || "image/png" }));
     if (typeof target.sourceIndex === "number" && sourceFiles[target.sourceIndex]) {
-      form.append("images", sourceFiles[target.sourceIndex]);
+      form.append("sources", sourceFiles[target.sourceIndex]);
     }
     const response = await fetch("/api/generate", { method: "POST", body: form });
     const payload = (await response.json()) as { image?: string; error?: string };
@@ -484,6 +502,7 @@ export function StudioShell() {
             </section>
 
             <section className="quick-start">
+              <CreditsMarquee />
               <div className="section-heading">
                 <div><span className="section-index">01</span><h2>今天想做什么？</h2></div>
                 <p>每个工具都已经装好了 Skill 的专业判断。</p>
@@ -584,7 +603,7 @@ export function StudioShell() {
             <div className="drawer-body">
               <section className="mini-anchor-row">
                 <div className="mini-anchor-preview">{anchorUrl ? <img src={anchorUrl} alt="角色锚点" /> : <UserRound size={24} />}</div>
-                <div><small>本次主角 · {anchorStyleMode === "mengli" ? "转为萌粒风" : "保持原画风"}</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
+                <div><small>Image 1 · 最高优先级 · 固定萌粒风</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
                 <button onClick={() => setAnchorOpen(true)}>{anchor ? "更换" : "上传"}</button>
               </section>
 
@@ -685,22 +704,15 @@ export function StudioShell() {
             <button className="modal-close" onClick={() => setAnchorOpen(false)}><X /></button>
             <div className="modal-kicker"><UserRound size={18} /> 角色锚点</div>
             <h2>让 Studio 永远认得你</h2>
-            <p>请上传一张已经确认过的正面角色图。它只保存在这台设备，并在每次生成时作为第一身份参考。</p>
+            <p>请上传一张已经确认过的正面角色图。它只保存在这台设备，并在每次生成时强制作为 Image 1 与最高优先级身份参考。</p>
             <label className={`anchor-upload ${anchorUrl ? "has-anchor" : ""}`}>
               {anchorUrl ? <img src={anchorUrl} alt="当前角色锚点" /> : <><UploadCloud size={29} /><strong>上传锚点图</strong><span>正面全身、纯色背景最稳定</span></>}
               <input type="file" accept="image/*" onChange={(event) => void handleAnchorFile(event.target.files?.[0])} />
             </label>
             {anchor && <div className="current-anchor-meta"><div><Check size={15} /><span><strong>{anchor.name}</strong><small>{new Date(anchor.updatedAt).toLocaleString("zh-CN")} 保存</small></span></div><button onClick={() => void deleteAnchor()}><Trash2 size={15} /> 移除</button></div>}
-            <div className="anchor-style-choice">
-              <div><strong>角色输出画风</strong><small>只改变绘制方式，不改变发型、五官、服装和标志配色。</small></div>
-              <div className="anchor-style-options">
-                <button className={anchorStyleMode === "mengli" ? "active" : ""} type="button" onClick={() => void changeAnchorStyleMode("mengli")}>
-                  <span>转为萌粒风</span><small>Skill 默认 · 统一成手绘萌粒笔触</small>
-                </button>
-                <button className={anchorStyleMode === "preserve" ? "active" : ""} type="button" onClick={() => void changeAnchorStyleMode("preserve")}>
-                  <span>保持原画风</span><small>保留锚点原本的媒介和完成度</small>
-                </button>
-              </div>
+            <div className="anchor-style-lock">
+              <ShieldCheck size={18} />
+              <div><strong>固定萌粒风 · 不可切换</strong><small>只转换笔触与上色方式；发型、五官、身体比例、服装、配饰和标志配色始终以锚点为准。</small></div>
             </div>
             <div className="anchor-tips"><strong>更稳定的小诀窍</strong><span>完整头发或耳朵轮廓 · 标志性服装与配色 · 不要裁掉手脚 · 避免复杂场景</span></div>
             <button className="modal-primary" onClick={() => setAnchorOpen(false)} disabled={!anchor}>{anchor ? "就是这个角色" : "先上传一张图"}</button>

@@ -1,5 +1,6 @@
 import OpenAI, { toFile } from "openai";
 import { NextResponse } from "next/server";
+import { composeGenerationPrompt, getOrderedReferenceFiles } from "@/lib/generation-policy";
 import { getSessionApiKey } from "@/lib/session";
 import { allowRequest, isTrustedOrigin, secretFingerprint } from "@/lib/security";
 
@@ -45,47 +46,38 @@ export async function POST(request: Request) {
     const backgroundValue = String(form.get("background") || "auto");
     const quality = (["low", "medium", "high"].includes(qualityValue) ? qualityValue : "medium") as "low" | "medium" | "high";
     const background = (["auto", "opaque", "transparent"].includes(backgroundValue) ? backgroundValue : "auto") as "auto" | "opaque" | "transparent";
-    const imageFiles = form.getAll("images").filter((value): value is File => value instanceof File && value.size > 0);
+    const { anchor, sources, all: imageFiles } = getOrderedReferenceFiles(form);
 
     if (!prompt || prompt.length > 32000) {
       return NextResponse.json({ error: "生成说明为空或过长。" }, { status: 400 });
     }
+    if (!anchor) {
+      return NextResponse.json({ error: "每次生成都必须上传角色锚点，并将它作为第一身份参考。" }, { status: 400 });
+    }
     if (!ALLOWED_SIZES.has(size)) return NextResponse.json({ error: "不支持这个图片尺寸。" }, { status: 400 });
-    if (imageFiles.length > 10 || imageFiles.some((file) => file.size > MAX_FILE_BYTES)) {
-      return NextResponse.json({ error: "参考图最多 10 张，每张不超过 20MB。" }, { status: 400 });
+    if (sources.length > 9 || imageFiles.some((file) => file.size > MAX_FILE_BYTES)) {
+      return NextResponse.json({ error: "角色锚点之外最多 9 张内容参考图，每张不超过 20MB。" }, { status: 400 });
     }
     if (imageFiles.some((file) => !ALLOWED_IMAGE_TYPES.has(file.type))) {
       return NextResponse.json({ error: "参考图仅支持 PNG、JPG 和 WEBP。" }, { status: 400 });
     }
 
     const client = new OpenAI({ apiKey });
-    let result;
-
-    if (imageFiles.length) {
-      const uploads = await Promise.all(imageFiles.map(async (file) => {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        if (!hasValidImageSignature(bytes, file.type)) throw new Error("INVALID_IMAGE_SIGNATURE");
-        return toFile(Buffer.from(bytes), file.name || "reference.png", { type: file.type });
-      }));
-      result = await client.images.edit({
-        model: "gpt-image-2",
-        image: uploads,
-        prompt,
-        size: size as never,
-        quality,
-        background,
-        output_format: "png",
-      });
-    } else {
-      result = await client.images.generate({
-        model: "gpt-image-2",
-        prompt,
-        size: size as never,
-        quality,
-        background,
-        output_format: "png",
-      });
-    }
+    const uploads = await Promise.all(imageFiles.map(async (file, index) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!hasValidImageSignature(bytes, file.type)) throw new Error("INVALID_IMAGE_SIGNATURE");
+      const roleName = index === 0 ? `image-1-anchor-${file.name || "reference.png"}` : `image-${index + 1}-content-${file.name || "reference.png"}`;
+      return toFile(Buffer.from(bytes), roleName, { type: file.type });
+    }));
+    const result = await client.images.edit({
+      model: "gpt-image-2",
+      image: uploads,
+      prompt: composeGenerationPrompt(prompt),
+      size: size as never,
+      quality,
+      background,
+      output_format: "png",
+    });
 
     const base64 = result.data?.[0]?.b64_json;
     if (!base64) throw new Error("模型没有返回可用图片，请重试这一张。");

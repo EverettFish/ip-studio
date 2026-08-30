@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorStyleInstruction, buildStaticJobs, defaultConfig, estimateCount, parseList, workflowMap } from "./workflows";
+import { buildStaticJobs, defaultConfig, estimateCount, parseList, workflowMap } from "./workflows";
 
 describe("workflow defaults", () => {
   it("creates the prescribed three sticker sheets", () => {
@@ -22,9 +22,16 @@ describe("workflow defaults", () => {
     expect(jobs[0].prompt).not.toContain("Life · 贴纸页");
   });
 
-  it("makes the selected anchor rendering mode explicit", () => {
-    expect(anchorStyleInstruction("mengli")).toContain("CONVERT TO MENGLI");
-    expect(anchorStyleInstruction("preserve")).toContain("PRESERVE ORIGINAL");
+  it("locks every static route to Image 1 identity and Mengli style", () => {
+    const routes = ["photo", "stickers", "folders", "letter", "polaroid", "avatars", "expressions", "possession"] as const;
+    for (const route of routes) {
+      const sourceCount = route === "photo" || route === "possession" ? 1 : 0;
+      const jobs = buildStaticJobs(route, defaultConfig(workflowMap[route]), sourceCount);
+      expect(jobs.length).toBeGreaterThan(0);
+      expect(jobs.every((item) => item.prompt.includes("Image 1 is always the user's accepted personal-IP anchor"))).toBe(true);
+      expect(jobs.every((item) => item.prompt.includes("MANDATORY HOUSE STYLE — MENGLI ONLY"))).toBe(true);
+    }
+    expect(workflowMap.possession.fields.some((field) => field.key === "style")).toBe(false);
   });
 
   it("creates one reconstruction per supplied meme", () => {
@@ -33,6 +40,20 @@ describe("workflow defaults", () => {
     expect(jobs).toHaveLength(4);
     expect(jobs.map((item) => item.sourceIndex)).toEqual([0, 1, 2, 3]);
     expect(jobs[0].prompt).toContain("complete head-and-body identity");
+    expect(jobs[0].prompt).toContain("fixed MENGLI style");
+    expect(jobs[0].prompt).not.toContain("SOURCE MEME /");
+  });
+
+  it("keeps route-specific Skill geometry in the generated prompts", () => {
+    const folder = buildStaticJobs("folders", defaultConfig(workflowMap.folders))[0];
+    const letter = buildStaticJobs("letter", defaultConfig(workflowMap.letter))[0];
+    const polaroid = buildStaticJobs("polaroid", defaultConfig(workflowMap.polaroid))[0];
+    expect(folder.prompt).toContain("width:height 1.28–1.45");
+    expect(folder.prompt).toContain("outline-free");
+    expect(letter.prompt).toContain("58–70%");
+    expect(letter.prompt).toContain("9–12 light");
+    expect(polaroid.prompt).toContain("58–68%");
+    expect(polaroid.background).toBe("transparent");
   });
 
   it("keeps route counts and list parsing deterministic", () => {
