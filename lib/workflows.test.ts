@@ -22,16 +22,36 @@ describe("workflow defaults", () => {
     expect(jobs[0].prompt).not.toContain("Life · 贴纸页");
   });
 
-  it("locks every static route to Image 1 identity and Mengli style", () => {
-    const routes = ["photo", "stickers", "folders", "letter", "polaroid", "avatars", "expressions", "possession"] as const;
+  it("locks non-expression routes to Image 1 identity and Mengli style", () => {
+    const routes = ["photo", "stickers", "folders", "letter", "polaroid", "avatars"] as const;
     for (const route of routes) {
-      const sourceCount = route === "photo" || route === "possession" ? 1 : 0;
+      const sourceCount = route === "photo" ? 1 : 0;
       const jobs = buildStaticJobs(route, defaultConfig(workflowMap[route]), sourceCount);
       expect(jobs.length).toBeGreaterThan(0);
       expect(jobs.every((item) => item.prompt.includes("Image 1 is always the user's accepted personal-IP anchor"))).toBe(true);
       expect(jobs.every((item) => item.prompt.includes("MANDATORY HOUSE STYLE — MENGLI ONLY"))).toBe(true);
     }
-    expect(workflowMap.possession.fields.some((field) => field.key === "style")).toBe(false);
+  });
+
+  it("offers and applies all three styles in both expression workflows", () => {
+    for (const route of ["expressions", "possession"] as const) {
+      const styleField = workflowMap[route].fields.find((field) => field.key === "style");
+      expect(styleField?.defaultValue).toBe("meme");
+      expect(styleField?.options?.map((option) => option.value)).toEqual(["meme", "anchor", "mengli"]);
+
+      const sourceCount = route === "possession" ? 1 : 0;
+      const base = defaultConfig(workflowMap[route]);
+      const meme = buildStaticJobs(route, { ...base, style: "meme" }, sourceCount)[0].prompt;
+      const anchor = buildStaticJobs(route, { ...base, style: "anchor" }, sourceCount)[0].prompt;
+      const mengli = buildStaticJobs(route, { ...base, style: "mengli" }, sourceCount)[0].prompt;
+
+      expect(meme).toContain("NATIVE MEME / REACTION STYLE");
+      expect(meme).not.toContain("MENGLI ONLY");
+      expect(anchor).toContain("ANCHOR ORIGINAL STYLE");
+      expect(anchor).not.toContain("MENGLI ONLY");
+      expect(mengli).toContain("MENGLI ONLY");
+      expect([meme, anchor, mengli].every((prompt) => prompt.includes("only identity source"))).toBe(true);
+    }
   });
 
   it("creates one reconstruction per supplied meme", () => {
@@ -40,8 +60,8 @@ describe("workflow defaults", () => {
     expect(jobs).toHaveLength(4);
     expect(jobs.map((item) => item.sourceIndex)).toEqual([0, 1, 2, 3]);
     expect(jobs[0].prompt).toContain("complete head-and-body identity");
-    expect(jobs[0].prompt).toContain("fixed MENGLI style");
-    expect(jobs[0].prompt).not.toContain("SOURCE MEME /");
+    expect(jobs[0].prompt).toContain("NATIVE MEME / REACTION STYLE");
+    expect(jobs[0].prompt).toContain("Image 2's own rendering medium");
   });
 
   it("keeps route-specific Skill geometry in the generated prompts", () => {

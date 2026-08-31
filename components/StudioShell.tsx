@@ -181,6 +181,7 @@ export function StudioShell() {
 
   const active = workflowMap[activeId];
   const activeConfig = configByRoute[activeId];
+  const expressionStyleSelectable = activeId === "expressions" || activeId === "possession";
   const estimatedCount = estimateCount(activeId, activeConfig, sourceFiles.length);
   const hasPrimaryInput = Boolean(active.needsArticle || active.needsSources);
   const configStep = hasPrimaryInput ? 2 : 1;
@@ -618,7 +619,7 @@ export function StudioShell() {
             <div className="drawer-body">
               <section className="mini-anchor-row">
                 <div className="mini-anchor-preview">{anchorUrl ? <img src={anchorUrl} alt="角色锚点" /> : <UserRound size={24} />}</div>
-                <div><small>Image 1 · 最高优先级 · 固定萌粒风</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
+                <div><small>Image 1 · 最高优先级 · {expressionStyleSelectable ? "身份固定，画风按问卷选择" : "固定萌粒风"}</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
                 <button onClick={() => setAnchorOpen(true)}>{anchor ? "更换" : "上传"}</button>
               </section>
 
@@ -727,7 +728,7 @@ export function StudioShell() {
             {anchor && <div className="current-anchor-meta"><div><Check size={15} /><span><strong>{anchor.name}</strong><small>{new Date(anchor.updatedAt).toLocaleString("zh-CN")} 保存</small></span></div><button onClick={() => void deleteAnchor()}><Trash2 size={15} /> 移除</button></div>}
             <div className="anchor-style-lock">
               <ShieldCheck size={18} />
-              <div><strong>固定萌粒风 · 不可切换</strong><small>只转换笔触与上色方式；发型、五官、身体比例、服装、配饰和标志配色始终以锚点为准。</small></div>
+              <div><strong>角色身份固定 · 表情功能可选画风</strong><small>发型、五官、身体比例、服装、配饰和标志配色始终以锚点为准；表情包与表情包夺舍可选择原生表情画风、锚点原画风或萌粒风。</small></div>
             </div>
             <div className="anchor-tips"><strong>更稳定的小诀窍</strong><span>完整头发或耳朵轮廓 · 标志性服装与配色 · 不要裁掉手脚 · 避免复杂场景</span></div>
             <button className="modal-primary" onClick={() => setAnchorOpen(false)} disabled={!anchor}>{anchor ? "就是这个角色" : "先上传一张图"}</button>

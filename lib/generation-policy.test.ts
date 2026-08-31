@@ -10,6 +10,23 @@ describe("generation policy", () => {
     expect(prompt).toContain("ROUTE REQUEST:\nCreate the requested asset.");
   });
 
+  it("keeps identity fixed while switching the three expression styles", () => {
+    const meme = composeGenerationPrompt("Reaction route.", "meme");
+    const anchor = composeGenerationPrompt("Reaction route.", "anchor");
+    const mengli = composeGenerationPrompt("Reaction route.", "mengli");
+
+    for (const prompt of [meme, anchor, mengli]) {
+      expect(prompt).toContain("Image 1 is always the user's accepted personal-IP anchor");
+    }
+    expect(meme).toContain("NATIVE MEME / REACTION STYLE");
+    expect(meme).toContain("Image 2's own rendering medium");
+    expect(meme).not.toContain("MENGLI ONLY");
+    expect(anchor).toContain("ANCHOR ORIGINAL STYLE");
+    expect(anchor).toContain("Image 1 controls both identity and rendering medium");
+    expect(anchor).not.toContain("MENGLI ONLY");
+    expect(mengli).toContain("MENGLI ONLY");
+  });
+
   it("orders the anchor before every source reference", () => {
     const form = new FormData();
     const anchor = new File(["anchor"], "anchor.webp", { type: "image/webp" });
