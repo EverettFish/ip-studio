@@ -1,0 +1,33 @@
+name: 问题反馈
+description: 报告可以稳定复现的问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题现象
+      description: 实际发生了什么？请附截图，但不要暴露 API Key。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 点击……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 浏览器与设备
+      placeholder: 例如 Chrome 版本、Windows/macOS、手机型号

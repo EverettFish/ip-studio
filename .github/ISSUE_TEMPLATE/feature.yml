@@ -1,0 +1,26 @@
+name: 功能建议
+description: 提议一个新的功能或流程改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 用户目标
+      description: 谁会在什么场景下使用？现在为什么不方便？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述理想流程、关键文案和参考图。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      placeholder: 每行写一个可以明确检查的结果
+    validations:
+      required: true
