@@ -56,6 +56,7 @@ export type GenerationJob = {
 export type JobState = GenerationJob & {
   status: "queued" | "generating" | "done" | "error";
   image?: string;
+  imageBlob?: Blob;
   error?: string;
 };
 

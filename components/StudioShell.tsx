@@ -34,7 +34,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentType, DragEvent, FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import type {
   AnchorRecord,
@@ -53,7 +53,6 @@ import {
 } from "@/lib/workflows";
 import {
   clearArtworks,
-  dataUrlToBlob,
   getAnchor,
   listArtworks,
   removeAnchor,
@@ -176,6 +175,7 @@ export function StudioShell() {
   const [jobs, setJobs] = useState<JobState[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const previewUrls = useRef(new Set<string>());
   const anchorUrl = useBlobUrl(anchor?.blob);
   const connected = Boolean(apiKey);
 
@@ -207,7 +207,23 @@ export function StudioShell() {
     });
   }, []);
 
+  useEffect(() => () => {
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current.clear();
+  }, []);
+
   const recentArtworks = useMemo(() => artworks.slice(0, 6), [artworks]);
+
+  function createPreviewUrl(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    previewUrls.current.add(url);
+    return url;
+  }
+
+  function clearJobPreviews() {
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current.clear();
+  }
 
   function openWorkflow(id: WorkflowId) {
     setMobileNav(false);
@@ -215,6 +231,7 @@ export function StudioShell() {
       setAnchorOpen(true);
       return;
     }
+    clearJobPreviews();
     setActiveId(id);
     setJobs([]);
     setNotice("");
@@ -297,7 +314,7 @@ export function StudioShell() {
     return planBrowserJobs({ apiKey, workflow: activeId, article, config: activeConfig });
   }
 
-  async function generateOne(target: GenerationJob): Promise<string> {
+  async function generateOne(target: GenerationJob): Promise<Blob> {
     if (!anchor) throw new Error("请先上传角色锚点。");
     if (!apiKey) throw new Error("请先连接 API Key。");
     return generateBrowserImage({
@@ -332,6 +349,7 @@ export function StudioShell() {
     setNotice(active.needsArticle ? "正在读文章，先把内容整理成画面清单…" : "已开始准备创作清单…");
     try {
       const planned = await planJobs();
+      clearJobPreviews();
       const state: JobState[] = planned.map((item) => ({ ...item, status: "queued" }));
       setJobs(state);
       setNotice(`清单准备好了，共 ${state.length} 张。现在逐张创作。`);
@@ -340,8 +358,8 @@ export function StudioShell() {
         const target = planned[index];
         setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "generating" } : item));
         try {
-          const image = await generateOne(target);
-          const blob = await dataUrlToBlob(image);
+          const blob = await generateOne(target);
+          const image = createPreviewUrl(blob);
           await saveArtwork({
             id: target.id,
             workflow: activeId,
@@ -349,7 +367,7 @@ export function StudioShell() {
             blob,
             createdAt: Date.now() + index,
           });
-          setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image } : item));
+          setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image, imageBlob: blob } : item));
         } catch (error) {
           const message = browserApiError(error);
           setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: message } : item));
@@ -367,10 +385,14 @@ export function StudioShell() {
   async function retryJob(target: JobState) {
     setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "generating", error: undefined } : item));
     try {
-      const image = await generateOne(target);
-      const blob = await dataUrlToBlob(image);
+      if (target.image?.startsWith("blob:")) {
+        URL.revokeObjectURL(target.image);
+        previewUrls.current.delete(target.image);
+      }
+      const blob = await generateOne(target);
+      const image = createPreviewUrl(blob);
       await saveArtwork({ id: target.id, workflow: activeId, title: target.title, blob, createdAt: Date.now() });
-      setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image } : item));
+      setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image, imageBlob: blob } : item));
       setArtworks(await listArtworks());
     } catch (error) {
       setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: browserApiError(error) } : item));
@@ -378,13 +400,12 @@ export function StudioShell() {
   }
 
   async function downloadRound() {
-    const completed = jobs.filter((item) => item.status === "done" && item.image);
+    const completed = jobs.filter((item): item is JobState & { imageBlob: Blob } => item.status === "done" && item.imageBlob instanceof Blob);
     if (!completed.length) return;
     const zip = new JSZip();
-    await Promise.all(completed.map(async (item, index) => {
-      const blob = await dataUrlToBlob(item.image!);
-      zip.file(`${String(index + 1).padStart(2, "0")}-${item.title}.png`, blob);
-    }));
+    completed.forEach((item, index) => {
+      zip.file(`${String(index + 1).padStart(2, "0")}-${item.title}.png`, item.imageBlob);
+    });
     const file = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(file);
     const link = document.createElement("a");

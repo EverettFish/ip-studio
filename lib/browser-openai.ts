@@ -2,6 +2,7 @@
 
 import OpenAI from "openai";
 import { composeGenerationPrompt, MANDATORY_GENERATION_POLICY } from "./generation-policy";
+import { base64PngToBlob } from "./image-result";
 import type { AnchorRecord, GenerationJob, WorkflowConfig } from "./types";
 
 const KEY_STORAGE = "ip-studio-api-key-session";
@@ -111,7 +112,7 @@ export async function generateBrowserImage(args: {
   job: GenerationJob;
   quality: "low" | "medium" | "high";
   source?: File;
-}): Promise<string> {
+}): Promise<Blob> {
   const anchorFile = await checkedFile(new File([args.anchor.blob], args.anchor.name, { type: args.anchor.blob.type || "image/png" }));
   const images = [anchorFile];
   if (args.source) images.push(await checkedFile(args.source));
@@ -127,7 +128,7 @@ export async function generateBrowserImage(args: {
   });
   const base64 = result.data?.[0]?.b64_json;
   if (!base64) throw new Error("模型没有返回可用图片，请重试这一张。");
-  return `data:image/png;base64,${base64}`;
+  return base64PngToBlob(base64);
 }
 
 export function browserApiError(error: unknown): string {

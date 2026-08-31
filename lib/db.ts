@@ -52,7 +52,3 @@ export async function removeArtwork(id: string): Promise<void> {
 export async function clearArtworks(): Promise<void> {
   await (await dbPromise()).clear("artworks");
 }
-
-export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  return fetch(dataUrl).then((response) => response.blob());
-}
