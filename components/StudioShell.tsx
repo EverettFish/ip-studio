@@ -431,7 +431,7 @@ export function StudioShell() {
     <div className="studio-shell">
       <aside className={`sidebar ${mobileNav ? "is-open" : ""}`}>
         <div className="brand" onClick={() => setView("studio")} role="button" tabIndex={0}>
-          <div className="brand-mark"><Aperture size={23} /></div>
+          <div className="brand-mark"><img src="/brand/ip-studio-logo.webp" alt="IP Studio 双人角色 Logo" /></div>
           <div><strong>IP Studio</strong><span>你的角色创作间</span></div>
         </div>
 

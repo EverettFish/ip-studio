@@ -538,15 +538,16 @@ body::before,
 
 .brand { gap: 11px; padding: 0 4px 22px; }
 .brand-mark {
-  width: 36px;
-  height: 36px;
-  color: #ffffff;
-  background: #111111;
+  width: 52px;
+  height: 43px;
+  flex: 0 0 auto;
+  background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: 0;
   box-shadow: none;
   transform: none;
 }
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; }
 .brand strong { font-family: var(--body); font-size: 17px; font-weight: 750; letter-spacing: -0.02em; }
 .brand span { margin-top: 3px; color: #777777; font-size: 10px; letter-spacing: 0; }
 
