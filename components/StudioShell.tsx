@@ -38,12 +38,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import type {
   AnchorRecord,
+  AnchorStyleId,
   ArtworkRecord,
   GenerationJob,
   JobState,
   WorkflowConfig,
   WorkflowId,
 } from "@/lib/types";
+import { ANCHOR_STYLE_PRESETS, getAnchorStylePreset } from "@/lib/anchor-styles";
 import {
   buildStaticJobs,
   defaultConfig,
@@ -62,6 +64,7 @@ import {
 } from "@/lib/db";
 import {
   browserApiError,
+  convertBrowserAnchor,
   forgetApiKey,
   generateBrowserImage,
   planBrowserJobs,
@@ -163,6 +166,10 @@ export function StudioShell() {
   const [apiKey, setApiKey] = useState("");
   const [apiOpen, setApiOpen] = useState(false);
   const [anchorOpen, setAnchorOpen] = useState(false);
+  const [pendingAnchorFile, setPendingAnchorFile] = useState<File>();
+  const [pendingAnchorStyle, setPendingAnchorStyle] = useState<AnchorStyleId>("original");
+  const [anchorConverting, setAnchorConverting] = useState(false);
+  const [resumeAnchorAfterApi, setResumeAnchorAfterApi] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeId, setActiveId] = useState<WorkflowId>("article");
   const [configByRoute, setConfigByRoute] = useState<Record<WorkflowId, WorkflowConfig>>(() =>
@@ -177,11 +184,12 @@ export function StudioShell() {
   const [notice, setNotice] = useState("");
   const previewUrls = useRef(new Set<string>());
   const anchorUrl = useBlobUrl(anchor?.blob);
+  const pendingAnchorUrl = useBlobUrl(pendingAnchorFile);
   const connected = Boolean(apiKey);
 
   const active = workflowMap[activeId];
   const activeConfig = configByRoute[activeId];
-  const expressionStyleSelectable = activeId === "expressions" || activeId === "possession";
+  const anchorStyle = getAnchorStylePreset(anchor?.styleId);
   const estimatedCount = estimateCount(activeId, activeConfig, sourceFiles.length);
   const hasPrimaryInput = Boolean(active.needsArticle || active.needsSources);
   const configStep = hasPrimaryInput ? 2 : 1;
@@ -229,7 +237,7 @@ export function StudioShell() {
   function openWorkflow(id: WorkflowId) {
     setMobileNav(false);
     if (id === "anchor") {
-      setAnchorOpen(true);
+      openAnchorManager();
       return;
     }
     clearJobPreviews();
@@ -240,6 +248,19 @@ export function StudioShell() {
     setDrawerOpen(true);
   }
 
+  function openAnchorManager() {
+    setNotice("");
+    if (!pendingAnchorFile && anchor) {
+      const sourceBlob = anchor.sourceBlob || anchor.blob;
+      const sourceName = anchor.sourceName || anchor.name;
+      setPendingAnchorFile(new File([sourceBlob], sourceName, { type: sourceBlob.type || "image/png" }));
+      setPendingAnchorStyle(anchor.styleId || "original");
+    } else if (!pendingAnchorFile) {
+      setPendingAnchorStyle("original");
+    }
+    setAnchorOpen(true);
+  }
+
   function updateConfig(key: string, value: string | number | boolean) {
     if (!busy) setJobs([]);
     setConfigByRoute((current) => ({
@@ -248,7 +269,7 @@ export function StudioShell() {
     }));
   }
 
-  async function handleAnchorFile(file?: File) {
+  function handleAnchorFile(file?: File) {
     if (!file) return;
     if (!supportedImageTypes.has(file.type)) {
       setNotice("锚点图仅支持 PNG、JPG 和 WEBP。 ");
@@ -258,20 +279,56 @@ export function StudioShell() {
       setNotice("锚点图请控制在 20MB 以内。");
       return;
     }
-    const record: AnchorRecord = {
-      id: "primary",
-      name: file.name,
-      blob: file,
-      updatedAt: Date.now(),
-    };
-    await saveAnchor(record);
-    setAnchor(record);
-    setNotice("角色锚点已保存到这台设备，以后会自动引用。");
+    setPendingAnchorFile(file);
+    setPendingAnchorStyle("original");
+    setNotice("图片已载入，请确认 IP 核心画风后再保存锚点。");
+  }
+
+  async function confirmAnchorStyle() {
+    if (!pendingAnchorFile) return;
+    if (pendingAnchorStyle !== "original" && !apiKey) {
+      setResumeAnchorAfterApi(true);
+      setAnchorOpen(false);
+      setApiOpen(true);
+      return;
+    }
+
+    setAnchorConverting(true);
+    try {
+      const acceptedBlob = pendingAnchorStyle === "original"
+        ? pendingAnchorFile
+        : await convertBrowserAnchor({
+            apiKey,
+            source: pendingAnchorFile,
+            styleId: pendingAnchorStyle,
+            quality: "medium",
+          });
+      const baseName = pendingAnchorFile.name.replace(/\.[^.]+$/, "") || "ip-anchor";
+      const record: AnchorRecord = {
+        id: "primary",
+        name: pendingAnchorStyle === "original" ? pendingAnchorFile.name : `${baseName}-${pendingAnchorStyle}.png`,
+        blob: acceptedBlob,
+        sourceName: pendingAnchorFile.name,
+        sourceBlob: pendingAnchorFile,
+        styleId: pendingAnchorStyle,
+        updatedAt: Date.now(),
+      };
+      await saveAnchor(record);
+      setAnchor(record);
+      setNotice(`${getAnchorStylePreset(pendingAnchorStyle).label}已确认为 IP 核心画风，之后默认沿用。`);
+      setAnchorOpen(false);
+    } catch (cause) {
+      setNotice(browserApiError(cause));
+    } finally {
+      setAnchorConverting(false);
+    }
   }
 
   async function deleteAnchor() {
     await removeAnchor();
     setAnchor(undefined);
+    setPendingAnchorFile(undefined);
+    setPendingAnchorStyle("original");
     setNotice("已移除本机角色锚点。");
   }
 
@@ -333,7 +390,7 @@ export function StudioShell() {
       return;
     }
     if (!anchor) {
-      setAnchorOpen(true);
+      openAnchorManager();
       setNotice("先给 Studio 一张角色锚点，后面每次都会自动复用。");
       return;
     }
@@ -442,10 +499,10 @@ export function StudioShell() {
             {anchorUrl ? <img src={anchorUrl} alt="当前角色锚点" /> : <UserRound size={28} />}
           </div>
           <div className="anchor-copy">
-            <small>当前角色</small>
+            <small>{anchor ? `当前角色 · ${anchorStyle.shortLabel}` : "当前角色"}</small>
             <strong>{anchor ? anchor.name.replace(/\.[^.]+$/, "") : "还没认识你"}</strong>
           </div>
-          <button onClick={() => setAnchorOpen(true)} aria-label="管理角色锚点"><Plus size={16} /></button>
+          <button onClick={openAnchorManager} aria-label="管理角色锚点"><Plus size={16} /></button>
         </div>
 
         <nav className="primary-nav">
@@ -564,7 +621,7 @@ export function StudioShell() {
 
             <section className="how-it-works">
               <div className="how-copy"><small>不用学提示词</small><h2>三步，把角色变成你的内容资产</h2></div>
-              <div className="step"><b>1</b><span><strong>上传角色锚点</strong><small>确认一次，以后自动引用</small></span></div>
+              <div className="step"><b>1</b><span><strong>上传并确认锚点画风</strong><small>原图直用，或用 GPT Image 2 转换</small></span></div>
               <div className="step-line" />
               <div className="step"><b>2</b><span><strong>回答短问卷</strong><small>主题、数量、用途就够了</small></span></div>
               <div className="step-line" />
@@ -619,8 +676,8 @@ export function StudioShell() {
             <div className="drawer-body">
               <section className="mini-anchor-row">
                 <div className="mini-anchor-preview">{anchorUrl ? <img src={anchorUrl} alt="角色锚点" /> : <UserRound size={24} />}</div>
-                <div><small>Image 1 · 最高优先级 · {expressionStyleSelectable ? "身份固定，画风按问卷选择" : "固定萌粒风"}</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
-                <button onClick={() => setAnchorOpen(true)}>{anchor ? "更换" : "上传"}</button>
+                <div><small>Image 1 · 最高优先级 · 核心画风：{anchor ? anchorStyle.shortLabel : "待确认"}</small><strong>{anchor ? anchor.name : "尚未上传角色锚点"}</strong></div>
+                <button onClick={openAnchorManager}>{anchor ? "更换" : "上传"}</button>
               </section>
 
               {active.needsArticle && (
@@ -713,25 +770,27 @@ export function StudioShell() {
         </div>
       )}
 
-      {apiOpen && <ApiKeyModal connected={connected} onClose={() => setApiOpen(false)} onConnect={(value) => { rememberApiKey(value); setApiKey(value); }} onDisconnect={() => { forgetApiKey(); setApiKey(""); }} />}
+      {apiOpen && <ApiKeyModal connected={connected} onClose={() => { setApiOpen(false); setResumeAnchorAfterApi(false); }} onConnect={(value) => { rememberApiKey(value); setApiKey(value); if (resumeAnchorAfterApi) { setResumeAnchorAfterApi(false); setAnchorOpen(true); } }} onDisconnect={() => { forgetApiKey(); setApiKey(""); }} />}
       {anchorOpen && (
-        <div className="modal-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) setAnchorOpen(false); }}>
+        <div className="modal-layer" onMouseDown={(event) => { if (event.target === event.currentTarget && !anchorConverting) setAnchorOpen(false); }}>
           <div className="paper-modal anchor-modal">
-            <button className="modal-close" onClick={() => setAnchorOpen(false)}><X /></button>
-            <div className="modal-kicker"><UserRound size={18} /> 角色锚点</div>
-            <h2>让 Studio 永远认得你</h2>
-            <p>请上传一张已经确认过的正面角色图。它只保存在这台设备，并在每次生成时强制作为 Image 1 与最高优先级身份参考。</p>
-            <label className={`anchor-upload ${anchorUrl ? "has-anchor" : ""}`}>
-              {anchorUrl ? <img src={anchorUrl} alt="当前角色锚点" /> : <><UploadCloud size={29} /><strong>上传锚点图</strong><span>正面全身、纯色背景最稳定</span></>}
-              <input type="file" accept="image/*" onChange={(event) => void handleAnchorFile(event.target.files?.[0])} />
+            <button className="modal-close" onClick={() => setAnchorOpen(false)} disabled={anchorConverting}><X /></button>
+            <div className="modal-kicker"><UserRound size={18} /> Image 1 · IP 核心锚点</div>
+            <h2>先确认角色，再确认画风</h2>
+            <p>每次上传都要在这里确认一次。选择转换时，GPT Image 2 只改变绘制媒介；身份仍严格来自你的原图。确认后的结果会成为所有创作默认使用的 Image 1。</p>
+            <label className={`anchor-upload ${pendingAnchorUrl ? "has-anchor" : ""}`}>
+              {pendingAnchorUrl ? <><img src={pendingAnchorUrl} alt="待确认的身份原图" /><span className="replace-anchor-hint">点击更换身份原图</span></> : <><UploadCloud size={29} /><strong>上传身份原图</strong><span>正面全身、纯色背景最稳定</span></>}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleAnchorFile(event.target.files?.[0])} />
             </label>
-            {anchor && <div className="current-anchor-meta"><div><Check size={15} /><span><strong>{anchor.name}</strong><small>{new Date(anchor.updatedAt).toLocaleString("zh-CN")} 保存</small></span></div><button onClick={() => void deleteAnchor()}><Trash2 size={15} /> 移除</button></div>}
+            {pendingAnchorFile && <div className="anchor-style-section"><div className="anchor-style-heading"><span>选择 IP 核心画风</span><small>示例只展示画法，不提供角色身份</small></div><div className="anchor-style-grid">{ANCHOR_STYLE_PRESETS.map((preset) => { const preview = preset.id === "original" ? pendingAnchorUrl : preset.preview; return <button type="button" className={`anchor-style-option ${pendingAnchorStyle === preset.id ? "is-selected" : ""}`} onClick={() => setPendingAnchorStyle(preset.id)} disabled={anchorConverting} key={preset.id}>{preview && <img src={preview} alt={`${preset.label}示例`} />}<span><strong>{preset.label}</strong><small>{preset.description}</small></span>{pendingAnchorStyle === preset.id && <Check size={16} />}</button>; })}</div></div>}
+            {anchor && <div className="current-anchor-meta"><div><Check size={15} /><span><strong>当前：{anchorStyle.label}</strong><small>{new Date(anchor.updatedAt).toLocaleString("zh-CN")} 保存 · {anchor.name}</small></span></div><button onClick={() => void deleteAnchor()} disabled={anchorConverting}><Trash2 size={15} /> 移除</button></div>}
             <div className="anchor-style-lock">
               <ShieldCheck size={18} />
-              <div><strong>角色身份固定 · 表情功能可选画风</strong><small>发型、五官、身体比例、服装、配饰和标志配色始终以锚点为准；表情包与表情包夺舍可选择原生表情画风、锚点原画风或萌粒风。</small></div>
+              <div><strong>身份原图与转换后锚点都会只保存在本机</strong><small>后续默认跟随核心锚点画风；每个创作入口仍可临时改成萌粒风，表情包还可选择参考表情的原生画风。</small></div>
             </div>
             <div className="anchor-tips"><strong>更稳定的小诀窍</strong><span>完整头发或耳朵轮廓 · 标志性服装与配色 · 不要裁掉手脚 · 避免复杂场景</span></div>
-            <button className="modal-primary" onClick={() => setAnchorOpen(false)} disabled={!anchor}>{anchor ? "就是这个角色" : "先上传一张图"}</button>
+            {notice && <div className="notice anchor-notice"><Sparkles size={15} /><span>{notice}</span></div>}
+            <button className="modal-primary" onClick={() => void confirmAnchorStyle()} disabled={!pendingAnchorFile || anchorConverting}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> GPT Image 2 正在转换并核对身份</> : !pendingAnchorFile ? "先上传一张身份原图" : pendingAnchorStyle === "original" ? "确认原图为核心锚点" : connected ? `转换为${getAnchorStylePreset(pendingAnchorStyle).label}并确认` : "连接 API Key 后转换"}</button>
           </div>
         </div>
       )}
