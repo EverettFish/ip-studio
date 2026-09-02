@@ -14,6 +14,8 @@ export type WorkflowId =
 export type ConfigValue = string | number | boolean;
 export type WorkflowConfig = Record<string, ConfigValue>;
 
+export type AnchorStyleId = "original" | "mengli" | "island-3d" | "flat";
+
 export type FieldOption = { label: string; value: string };
 
 export type FieldDefinition = {
@@ -64,6 +66,9 @@ export type AnchorRecord = {
   id: "primary";
   name: string;
   blob: Blob;
+  sourceName?: string;
+  sourceBlob?: Blob;
+  styleId?: AnchorStyleId;
   updatedAt: number;
 };
 

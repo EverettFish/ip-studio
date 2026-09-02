@@ -22,22 +22,34 @@ describe("workflow defaults", () => {
     expect(jobs[0].prompt).not.toContain("Life · 贴纸页");
   });
 
-  it("locks non-expression routes to Image 1 identity and Mengli style", () => {
+  it("defaults every standard route to the accepted anchor style", () => {
     const routes = ["photo", "stickers", "folders", "letter", "polaroid", "avatars"] as const;
     for (const route of routes) {
+      const styleField = workflowMap[route].fields.find((field) => field.key === "style");
+      expect(styleField?.defaultValue).toBe("anchor");
+      expect(styleField?.options?.map((option) => option.value)).toEqual(["anchor", "mengli"]);
       const sourceCount = route === "photo" ? 1 : 0;
       const jobs = buildStaticJobs(route, defaultConfig(workflowMap[route]), sourceCount);
       expect(jobs.length).toBeGreaterThan(0);
       expect(jobs.every((item) => item.prompt.includes("Image 1 is always the user's accepted personal-IP anchor"))).toBe(true);
-      expect(jobs.every((item) => item.prompt.includes("MANDATORY HOUSE STYLE — MENGLI ONLY"))).toBe(true);
+      expect(jobs.every((item) => item.prompt.includes("MANDATORY OUTPUT STYLE — ANCHOR ORIGINAL STYLE"))).toBe(true);
     }
+  });
+
+  it("keeps Mengli available as a temporary override on every standard route", () => {
+    for (const route of ["article", "infographic", "photo", "stickers", "folders", "letter", "polaroid", "avatars"] as const) {
+      const styleField = workflowMap[route].fields.find((field) => field.key === "style");
+      expect(styleField?.options?.some((option) => option.value === "mengli")).toBe(true);
+    }
+    const sticker = buildStaticJobs("stickers", { ...defaultConfig(workflowMap.stickers), style: "mengli" })[0];
+    expect(sticker.prompt).toContain("MANDATORY HOUSE STYLE — MENGLI ONLY");
   });
 
   it("offers and applies all three styles in both expression workflows", () => {
     for (const route of ["expressions", "possession"] as const) {
       const styleField = workflowMap[route].fields.find((field) => field.key === "style");
-      expect(styleField?.defaultValue).toBe("meme");
-      expect(styleField?.options?.map((option) => option.value)).toEqual(["meme", "anchor", "mengli"]);
+      expect(styleField?.defaultValue).toBe("anchor");
+      expect(styleField?.options?.map((option) => option.value)).toEqual(["anchor", "mengli", "meme"]);
 
       const sourceCount = route === "possession" ? 1 : 0;
       const base = defaultConfig(workflowMap[route]);
@@ -55,7 +67,7 @@ describe("workflow defaults", () => {
   });
 
   it("creates one reconstruction per supplied meme", () => {
-    const config = defaultConfig(workflowMap.possession);
+    const config = { ...defaultConfig(workflowMap.possession), style: "meme" };
     const jobs = buildStaticJobs("possession", config, 4);
     expect(jobs).toHaveLength(4);
     expect(jobs.map((item) => item.sourceIndex)).toEqual([0, 1, 2, 3]);

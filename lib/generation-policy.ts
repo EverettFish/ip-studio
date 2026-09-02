@@ -17,15 +17,18 @@ const STYLE_POLICIES: Record<GenerationStyleMode, string> = {
 - Keep one coherent medium across the character, clothing, props, background, effects, border, and text. Do not force Mengli mark-making, preserve the anchor's original medium, or mix styles.`,
   anchor: `MANDATORY OUTPUT STYLE — ANCHOR ORIGINAL STYLE:
 - Image 1 controls both identity and rendering medium. Preserve its original line quality, shape language, color handling, shading, texture, dimensionality, and degree of simplification.
-- When Image 2 exists, preserve Image 2's composition, pose, crop, expression, true garments, props, background structure, effects, borders, and text, but translate every visible element into Image 1's original rendering medium.
+- When Image 2 exists, preserve Image 2's composition, pose, crop, expression, true garments, props, background structure, effects, borders, and text, but translate the illustrative output into Image 1's original rendering medium. If the route explicitly requires preserving a real photograph, keep the photograph photographic and apply Image 1's medium only to the inserted IP.
 - Keep one coherent medium across the complete result. Do not force Mengli mark-making, copy another character's identity, or leave Image 2 in a conflicting medium.`,
   mengli: `MANDATORY HOUSE STYLE — MENGLI ONLY:
 ${MENGLI_STYLE}.
 Convert the anchor's mark-making into this Mengli house style while preserving identity exactly. Do not preserve or switch to the anchor's original rendering medium. Do not use source-meme style, 3D, pixel art, glossy anime, vector-perfect rendering, watercolor, crayon, oil pastel, or mixed media.`,
 };
 
-export function normalizeGenerationStyle(value: unknown): GenerationStyleMode {
-  return value === "meme" || value === "anchor" || value === "mengli" ? value : "meme";
+export function normalizeGenerationStyle(
+  value: unknown,
+  fallback: GenerationStyleMode = "anchor",
+): GenerationStyleMode {
+  return value === "meme" || value === "anchor" || value === "mengli" ? value : fallback;
 }
 
 export function generationPolicy(style: GenerationStyleMode = "mengli"): string {

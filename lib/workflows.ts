@@ -7,7 +7,6 @@ import type {
 } from "@/lib/types";
 import {
   composeGenerationPrompt,
-  MENGLI_STYLE,
   normalizeGenerationStyle,
   type GenerationStyleMode,
 } from "./generation-policy";
@@ -17,10 +16,22 @@ const identityHeader = "";
 export const DEFAULT_STICKER_THEMES = ["Life", "Work", "Media"];
 
 const EXPRESSION_STYLE_OPTIONS = [
-  { label: "表情包原生画风", value: "meme" },
-  { label: "角色锚点原画风", value: "anchor" },
+  { label: "跟随锚点核心画风", value: "anchor" },
   { label: "萌粒画风", value: "mengli" },
+  { label: "表情包原生画风", value: "meme" },
 ];
+
+const CORE_STYLE_FIELD = {
+  key: "style",
+  label: "本次生成画风",
+  kind: "select" as const,
+  defaultValue: "anchor",
+  options: [
+    { label: "跟随锚点核心画风", value: "anchor" },
+    { label: "萌粒画风", value: "mengli" },
+  ],
+  help: "默认沿用已确认的核心锚点画风；也可临时切换为萌粒风，不会改动锚点本身。",
+};
 
 export function stickerThemes(config: WorkflowConfig): string[] {
   return parseList(config.themes, DEFAULT_STICKER_THEMES).slice(0, 6);
@@ -32,7 +43,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     number: "00",
     title: "角色锚点",
     eyebrow: "先认识你",
-    description: "保存一个确认过的角色形象，之后所有创作都自动引用。",
+    description: "上传身份图并确认核心画风，之后所有创作都默认引用。",
     color: "butter",
     routeImage: "/art/routes/anchor.webp",
     fields: [],
@@ -47,6 +58,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     routeImage: "/art/routes/article.webp",
     needsArticle: true,
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "count",
         label: "配图数量",
@@ -80,6 +92,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     routeImage: "/art/routes/infographic.webp",
     needsArticle: true,
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "pages",
         label: "页数",
@@ -122,6 +135,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     sourceHelp: "每张照片生成一张融合图，原图构图和无关区域保持不变。",
     accept: "image/*",
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "intent",
         label: "这次在做什么",
@@ -147,6 +161,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     color: "butter",
     routeImage: "/art/routes/stickers.webp",
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "themes",
         label: "每张贴纸页的标题",
@@ -174,6 +189,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     color: "coral",
     routeImage: "/art/routes/folders.webp",
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "names",
         label: "要做哪些文件夹",
@@ -199,6 +215,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     color: "mint",
     routeImage: "/art/routes/letter.webp",
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "themes",
         label: "五张主题",
@@ -224,6 +241,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     color: "lilac",
     routeImage: "/art/routes/polaroid.webp",
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "themes",
         label: "边框主题",
@@ -248,6 +266,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
     color: "blue",
     routeImage: "/art/routes/avatars.webp",
     fields: [
+      CORE_STYLE_FIELD,
       {
         key: "themes",
         label: "头像场景",
@@ -276,7 +295,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         key: "style",
         label: "生成画风",
         kind: "select",
-        defaultValue: "meme",
+        defaultValue: "anchor",
         options: EXPRESSION_STYLE_OPTIONS,
         help: "身份始终以角色锚点为准；这里只决定整张表情的绘制方式。",
       },
@@ -320,7 +339,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         key: "style",
         label: "生成画风",
         kind: "select",
-        defaultValue: "meme",
+        defaultValue: "anchor",
         options: EXPRESSION_STYLE_OPTIONS,
         help: "原生画风沿用参考表情包；锚点原画风沿用 Image 1；也可整张转为萌粒风。",
       },
@@ -415,6 +434,7 @@ export function buildStaticJobs(
   sourceCount = 0,
 ): GenerationJob[] {
   if (workflowId === "article" || workflowId === "infographic" || workflowId === "anchor") return [];
+  const style = normalizeGenerationStyle(config.style, "anchor");
 
   if (workflowId === "photo") {
     return Array.from({ length: sourceCount }, (_, index) =>
@@ -422,10 +442,11 @@ export function buildStaticJobs(
         workflowId,
         index,
         `实拍融合 ${index + 1}`,
-        `${identityHeader}\n\nCreate one final fused photograph. Image 2 is the real photograph and the actual edit target. Preserve its source crop, dimensions, orientation, camera viewpoint, faces, products, signs, text, artwork, architecture, and every unrelated region.\n\nUSER INTENT: ${config.intent}\nINTERACTION CONTRACT: ${config.interaction}. Choose one specific visible scene object, state the character action, front/behind relation, exact contact point, and local shadow/reflection/light cue, then generate that interaction. Include at least two convincing physical integration cues: foreground occlusion, feet/body surface contact, contact shadow, reflection, perspective match, or local light/color-temperature match. Keep one IP appearance with visible height around 22–26% of photo height, within 18–30% unless perspective requires otherwise.\n\nRender only the IP itself with ${MENGLI_STYLE}; keep the real scene photographic. Make a localized edit inside the interaction zone only. Reject a transparent cutout look, white fringe, sticker halo, floating pose, generic waving, global repainting, invented signage, or changes outside the interaction zone.`,
+        `${identityHeader}\n\nCreate one final fused photograph. Image 2 is the real photograph and the actual edit target. Preserve its source crop, dimensions, orientation, camera viewpoint, faces, products, signs, text, artwork, architecture, and every unrelated region.\n\nUSER INTENT: ${config.intent}\nINTERACTION CONTRACT: ${config.interaction}. Choose one specific visible scene object, state the character action, front/behind relation, exact contact point, and local shadow/reflection/light cue, then generate that interaction. Include at least two convincing physical integration cues: foreground occlusion, feet/body surface contact, contact shadow, reflection, perspective match, or local light/color-temperature match. Keep one IP appearance with visible height around 22–26% of photo height, within 18–30% unless perspective requires otherwise.\n\nApply the mandatory selected output style only to the inserted IP; keep the real scene photographic. Make a localized edit inside the interaction zone only. Reject a transparent cutout look, white fringe, sticker halo, floating pose, generic waving, global repainting, invented signage, or changes outside the interaction zone.`,
         "auto",
         "auto",
         index,
+        style,
       ),
     );
   }
@@ -438,9 +459,11 @@ export function buildStaticJobs(
         workflowId,
         index,
         `${theme} · 贴纸页`,
-        `${identityHeader}\n\nCreate one exact 3:4 portrait kiss-cut sticker sheet.\n\nTHEME AND HEADER TITLE EXACTLY:\n${theme}\n\nPAGE STRUCTURE:\n- Use two harmonious flat light-pastel zones derived from the accepted anchor palette.\n- Reserve only the top 12–16% for one full-width illustrated header block. Run one continuous lawn, meadow, or theme-equivalent ground edge to edge. Integrate one tiny accepted-IP scene directly into the header. The header is not a sticker: no white halo, cut border, floating contour, packaging hole, or separate panel around its title, character, or art.\n- Use the lower 84–88% as one uninterrupted, harmonizing, texture-free sticker field.\n\nBODY MANIFEST — EXACTLY 18 INDEPENDENT PIECES:\n1–3: three wide IP-led scene stickers; 4–8: five full-body or half-body IP actions; 9–12: four complete-hair or complete-fur heads, faces, or expressive busts; 13–18: six very small theme-specific filler stickerlets. Every large or medium piece must contain the IP. Standalone props are micro scale only.\n\nLAYOUT:\nCombined cut-border footprint 75–82%; two tidy visual rails with roughly equal side margins; calm staggered diagonal or S-curve rhythm; compact even breathing gaps; upper, middle, side, and lower areas occupied. Every body piece has its own continuous irregular white kiss-cut border, fully visible and separate. No touching, overlap, crop, straight rows, uniform columns, rigid grid, bottom prop strip, repeated oval blobs, large void, or glossy mockup.\n\nHOUSE STYLE:\n${MENGLI_STYLE}.\n\nBODY TEXT EXACTLY:\n${exactBodyText}\n\nDo not invent any other text. No logo, watermark, extra character, paper grain, 3D, rectangular UI card, or identity drift.`,
+        `${identityHeader}\n\nCreate one exact 3:4 portrait kiss-cut sticker sheet.\n\nTHEME AND HEADER TITLE EXACTLY:\n${theme}\n\nPAGE STRUCTURE:\n- Use two harmonious flat light-pastel zones derived from the accepted anchor palette.\n- Reserve only the top 12–16% for one full-width illustrated header block. Run one continuous lawn, meadow, or theme-equivalent ground edge to edge. Integrate one tiny accepted-IP scene directly into the header. The header is not a sticker: no white halo, cut border, floating contour, packaging hole, or separate panel around its title, character, or art.\n- Use the lower 84–88% as one uninterrupted, harmonizing, texture-free sticker field.\n\nBODY MANIFEST — EXACTLY 18 INDEPENDENT PIECES:\n1–3: three wide IP-led scene stickers; 4–8: five full-body or half-body IP actions; 9–12: four complete-hair or complete-fur heads, faces, or expressive busts; 13–18: six very small theme-specific filler stickerlets. Every large or medium piece must contain the IP. Standalone props are micro scale only.\n\nLAYOUT:\nCombined cut-border footprint 75–82%; two tidy visual rails with roughly equal side margins; calm staggered diagonal or S-curve rhythm; compact even breathing gaps; upper, middle, side, and lower areas occupied. Every body piece has its own continuous irregular white kiss-cut border, fully visible and separate. No touching, overlap, crop, straight rows, uniform columns, rigid grid, bottom prop strip, repeated oval blobs, large void, or glossy mockup.\n\nApply the mandatory selected output style consistently across the header and every sticker.\n\nBODY TEXT EXACTLY:\n${exactBodyText}\n\nDo not invent any other text. No logo, watermark, extra character, paper grain, rectangular UI card, or identity drift.`,
         "1024x1536",
         "opaque",
+        undefined,
+        style,
       );
     });
   }
@@ -452,9 +475,11 @@ export function buildStaticJobs(
         workflowId,
         index,
         name,
-        `${identityHeader}\n\nCreate one transparent 4:3 landscape personal-IP folder icon for “${name}”, intended for ${config.platform}. The folder fills 78–90% with even alpha margins. Use a substantial modern Mac-like silhouette: shallow rear layer, short upper-left tab, rounded front pocket, clear top lip; visible body width:height 1.28–1.45, front pocket 62–70% of total folder height. Keep the folder outline-free and build it from two or three clean matte flat color planes with only a restrained inner shadow beneath the lip.\n\nPhysically integrate the IP at 20–45% of folder height by peeking, emerging, leaning, sitting, or appearing as a direct front-panel scene. Use overlap and occlusion such as hands resting on the lip or the lip covering part of the body; never float a complete sticker above the folder. Add only one tiny purpose-specific prop. Preserve Mengli broken-pen treatment inside the IP and tiny prop only; keep folder geometry smooth. TEXT: NONE. No desktop screenshot, square tile, white rectangle, label, logo, watermark, outer folder contour, flattened banner, cast-shadow floor, bevel, glossy 3D mockup, extra character, crop, or identity drift.`,
+        `${identityHeader}\n\nCreate one transparent 4:3 landscape personal-IP folder icon for “${name}”, intended for ${config.platform}. The folder fills 78–90% with even alpha margins. Use a substantial modern Mac-like silhouette: shallow rear layer, short upper-left tab, rounded front pocket, clear top lip; visible body width:height 1.28–1.45, front pocket 62–70% of total folder height. Keep the folder outline-free and build it from two or three clean matte flat color planes with only a restrained inner shadow beneath the lip.\n\nPhysically integrate the IP at 20–45% of folder height by peeking, emerging, leaning, sitting, or appearing as a direct front-panel scene. Use overlap and occlusion such as hands resting on the lip or the lip covering part of the body; never float a complete sticker above the folder. Add only one tiny purpose-specific prop. Apply the mandatory selected output style to the IP and tiny prop only; keep folder geometry smooth and matte. TEXT: NONE. No desktop screenshot, square tile, white rectangle, label, logo, watermark, outer folder contour, flattened banner, cast-shadow floor, bevel, glossy folder mockup, extra character, crop, or identity drift.`,
         "1536x1024",
         "transparent",
+        undefined,
+        style,
       ),
     );
   }
@@ -473,9 +498,11 @@ export function buildStaticJobs(
         workflowId,
         index,
         `${theme}信纸`,
-        `${identityHeader}\n\nCreate one exact 3:4 portrait printable letter-paper sheet. THEME: ${theme}. LAYOUT PROFILE: ${profiles[index % profiles.length]}. WRITING AREA: ${config.writingSpace}; preserve 58–70% as a clean usable field with 9–12 light, generously spaced, hand-drawn horizontal lines. Shorten, offset, or split lines around the one coherent IP scene so no line crosses the character, face, or major decoration. Use only a few restrained theme motifs.\n\nKeep the IP in ${MENGLI_STYLE}. Allow light fine-colored-pencil traces only for atmosphere, border, decoration, and writing lines. Warm-white or very pale theme-tinted field with no paper grain. TEXT: NONE. No title, logo, watermark, second character scene, repeated top-only placement across the set, full-page illustration, dense decoration, dark writing field, thick rules, glossy rendering, paper mockup, hand holding the paper, or identity drift.`,
+        `${identityHeader}\n\nCreate one exact 3:4 portrait printable letter-paper sheet. THEME: ${theme}. LAYOUT PROFILE: ${profiles[index % profiles.length]}. WRITING AREA: ${config.writingSpace}; preserve 58–70% as a clean usable field with 9–12 light, generously spaced, hand-drawn horizontal lines. Shorten, offset, or split lines around the one coherent IP scene so no line crosses the character, face, or major decoration. Use only a few restrained theme motifs.\n\nApply the mandatory selected output style to the IP scene. Allow restrained light traces only for atmosphere, border, decoration, and writing lines. Warm-white or very pale theme-tinted field with no paper grain. TEXT: NONE. No title, logo, watermark, second character scene, repeated top-only placement across the set, full-page illustration, dense decoration, dark writing field, thick rules, paper mockup, hand holding the paper, or identity drift.`,
         "1024x1536",
         "opaque",
+        undefined,
+        style,
       ),
     );
   }
@@ -487,9 +514,11 @@ export function buildStaticJobs(
         workflowId,
         index,
         `${theme}拍立得框`,
-        `${identityHeader}\n\nCreate one exact 3:4 portrait usable Polaroid frame. THEME: ${theme}. Make one large centered rectangular photo window occupying 58–68% of the canvas, with comfortable border on all four sides and a slightly deeper lower border when suitable. Distribute themed decoration around all four sides. Place one to three small accepted-IP border appearances; permit at most 5% deliberate overlap into the window. BOTTOM NOTE EXACTLY: ${config.note || "NONE"}.\n\nALPHA: the entire central photo window is fully transparent; exterior beyond the outer frame silhouette is fully transparent; only the illustrated frame and attached art are opaque. STYLE: ${MENGLI_STYLE}. No white background, filled center, placeholder photo, fake checkerboard, logo, watermark, copied character, extra text, 3D frame mockup, cast-shadow surface, hand holding the frame, or identity drift.`,
+        `${identityHeader}\n\nCreate one exact 3:4 portrait usable Polaroid frame. THEME: ${theme}. Make one large centered rectangular photo window occupying 58–68% of the canvas, with comfortable border on all four sides and a slightly deeper lower border when suitable. Distribute themed decoration around all four sides. Place one to three small accepted-IP border appearances; permit at most 5% deliberate overlap into the window. BOTTOM NOTE EXACTLY: ${config.note || "NONE"}.\n\nALPHA: the entire central photo window is fully transparent; exterior beyond the outer frame silhouette is fully transparent; only the illustrated frame and attached art are opaque. Apply the mandatory selected output style to all illustrated border art. No white background, filled center, placeholder photo, fake checkerboard, logo, watermark, copied character, extra text, frame mockup, cast-shadow surface, hand holding the frame, or identity drift.`,
         "1024x1536",
         "transparent",
+        undefined,
+        style,
       ),
     );
   }
@@ -501,13 +530,16 @@ export function buildStaticJobs(
         workflowId,
         index,
         `${theme}头像`,
-        `${identityHeader}\n\nCreate one exact 1:1 personal-IP scene avatar on pure white. Theme: ${theme}. Crop: ${config.crop}, with only enough torso and hands for one theme prop. Center the face, preserve the complete anchored hair/fur/ears/accessories, and leave safe margin around crown and sides. The theme must read at chat-avatar size.\n\nSTYLE: ${MENGLI_STYLE}. TEXT: ${theme.includes("睡") ? "only a naive hand-drawn Zzz" : "NONE"}. No environment, frame, circle crop, gradient, logo, watermark, large face-covering prop, or identity drift.`,
+        `${identityHeader}\n\nCreate one exact 1:1 personal-IP scene avatar on pure white. Theme: ${theme}. Crop: ${config.crop}, with only enough torso and hands for one theme prop. Center the face, preserve the complete anchored hair/fur/ears/accessories, and leave safe margin around crown and sides. The theme must read at chat-avatar size.\n\nApply the mandatory selected output style. TEXT: ${theme.includes("睡") ? "only a naive hand-drawn Zzz" : "NONE"}. No environment, frame, circle crop, gradient, logo, watermark, large face-covering prop, or identity drift.`,
+        "1024x1024",
+        "opaque",
+        undefined,
+        style,
       ),
     );
   }
 
   if (workflowId === "expressions") {
-    const style = normalizeGenerationStyle(config.style);
     const meanings = [
       "开心", "笑到停不下来", "比心喜欢", "谢谢", "收到没问题", "庆祝加油",
       "震惊", "迷惑", "生气", "委屈", "大哭", "累到睡着",
@@ -528,7 +560,6 @@ export function buildStaticJobs(
   }
 
   if (workflowId === "possession") {
-    const style = normalizeGenerationStyle(config.style);
     return Array.from({ length: sourceCount }, (_, index) =>
       job(
         workflowId,
