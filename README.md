@@ -13,7 +13,7 @@ npm ci
 npm run dev
 ```
 
-打开 `http://localhost:3000/`。项目不需要服务端环境变量；用户在页面中连接自己的 OpenAI API Key。
+打开 `http://localhost:3000/`。项目不需要服务端环境变量；用户可以在页面中选择 OpenAI 官方、观猹 TokenDance，或自行填写兼容 API。
 
 ## 常用检查
 
@@ -30,8 +30,9 @@ npm run build
 
 ## 数据与隐私
 
-- OpenAI API Key 不写入代码、仓库、URL 或数据库，只保存在当前标签页的 `sessionStorage`，八小时、关闭标签页或主动断开后失效。
-- 浏览器使用用户自己的 Key 直接请求 OpenAI API，费用计入用户自己的 API 账户。
+- API Key 不写入代码、仓库、URL 或数据库，只保存在当前标签页的 `sessionStorage`，八小时、关闭标签页或主动断开后失效。
+- 浏览器使用用户自己的 Key 直接请求所选模型服务，费用计入用户自己的服务商账户。
+- TokenDance 支持 S256 PKCE 授权、余额显示与用户明确确认后的支付宝充值；自定义接口仅接受 HTTPS（本机 localhost 除外）。
 - 角色锚点和作品保存在当前浏览器的 IndexedDB。
 - 仓库不保存用户上传的锚点、文章、参考图或生成作品。
 

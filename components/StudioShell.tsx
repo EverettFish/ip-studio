@@ -33,7 +33,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import type { ComponentType, DragEvent, FormEvent } from "react";
+import type { ComponentType, DragEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import type {
@@ -46,6 +46,14 @@ import type {
   WorkflowId,
 } from "@/lib/types";
 import { ANCHOR_STYLE_PRESETS, getAnchorStylePreset } from "@/lib/anchor-styles";
+import {
+  completeTokenDanceAuthorization,
+  forgetAiConnection,
+  hasTokenDanceAuthorizationCallback,
+  rememberAiConnection,
+  restoreAiConnection,
+  type AiConnection,
+} from "@/lib/ai-provider";
 import {
   buildStaticJobs,
   defaultConfig,
@@ -65,13 +73,10 @@ import {
 import {
   browserApiError,
   convertBrowserAnchor,
-  forgetApiKey,
   generateBrowserImage,
   planBrowserJobs,
-  rememberApiKey,
-  restoreApiKey,
-  validateBrowserApiKey,
 } from "@/lib/browser-openai";
+import { ProviderModal } from "@/components/ProviderModal";
 
 const iconMap: Record<WorkflowId, ComponentType<{ size?: number; strokeWidth?: number }>> = {
   anchor: UserRound,
@@ -163,7 +168,7 @@ export function StudioShell() {
   const [mobileNav, setMobileNav] = useState(false);
   const [anchor, setAnchor] = useState<AnchorRecord>();
   const [artworks, setArtworks] = useState<ArtworkRecord[]>([]);
-  const [apiKey, setApiKey] = useState("");
+  const [connection, setConnection] = useState<AiConnection>();
   const [apiOpen, setApiOpen] = useState(false);
   const [anchorOpen, setAnchorOpen] = useState(false);
   const [pendingAnchorFile, setPendingAnchorFile] = useState<File>();
@@ -183,9 +188,10 @@ export function StudioShell() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const previewUrls = useRef(new Set<string>());
+  const oauthHandled = useRef(false);
   const anchorUrl = useBlobUrl(anchor?.blob);
   const pendingAnchorUrl = useBlobUrl(pendingAnchorFile);
-  const connected = Boolean(apiKey);
+  const connected = Boolean(connection?.apiKey);
 
   const active = workflowMap[activeId];
   const activeConfig = configByRoute[activeId];
@@ -209,11 +215,23 @@ export function StudioShell() {
   }, [active, activeConfig, activeId, sourceFiles.length]);
 
   useEffect(() => {
-    setApiKey(restoreApiKey());
+    setConnection(restoreAiConnection());
     void Promise.all([getAnchor(), listArtworks()]).then(([storedAnchor, storedArtworks]) => {
       setAnchor(storedAnchor);
       setArtworks(storedArtworks);
     });
+    if (hasTokenDanceAuthorizationCallback() && !oauthHandled.current) {
+      oauthHandled.current = true;
+      setApiOpen(true);
+      setNotice("正在完成 TokenDance 授权…");
+      void completeTokenDanceAuthorization()
+        .then((authorized) => {
+          rememberAiConnection(authorized);
+          setConnection(authorized);
+          setNotice("TokenDance 已连接，可以查看余额并开始创作。");
+        })
+        .catch((cause) => setNotice(browserApiError(cause)));
+    }
   }, []);
 
   useEffect(() => () => {
@@ -286,7 +304,7 @@ export function StudioShell() {
 
   async function confirmAnchorStyle() {
     if (!pendingAnchorFile) return;
-    if (pendingAnchorStyle !== "original" && !apiKey) {
+    if (pendingAnchorStyle !== "original" && !connection) {
       setResumeAnchorAfterApi(true);
       setAnchorOpen(false);
       setApiOpen(true);
@@ -298,7 +316,7 @@ export function StudioShell() {
       const acceptedBlob = pendingAnchorStyle === "original"
         ? pendingAnchorFile
         : await convertBrowserAnchor({
-            apiKey,
+            connection: connection!,
             source: pendingAnchorFile,
             styleId: pendingAnchorStyle,
             quality: "medium",
@@ -369,14 +387,15 @@ export function StudioShell() {
     if (activeId !== "article" && activeId !== "infographic") {
       return buildStaticJobs(activeId, activeConfig, sourceFiles.length);
     }
-    return planBrowserJobs({ apiKey, workflow: activeId, article, config: activeConfig });
+    if (!connection) throw new Error("请先连接创作 API。");
+    return planBrowserJobs({ connection, workflow: activeId, article, config: activeConfig });
   }
 
   async function generateOne(target: GenerationJob): Promise<Blob> {
     if (!anchor) throw new Error("请先上传角色锚点。");
-    if (!apiKey) throw new Error("请先连接 API Key。");
+    if (!connection) throw new Error("请先连接创作 API。");
     return generateBrowserImage({
-      apiKey,
+      connection,
       anchor,
       job: target,
       quality,
@@ -528,7 +547,7 @@ export function StudioShell() {
 
         <button className={`api-mini ${connected ? "connected" : ""}`} onClick={() => setApiOpen(true)}>
           {connected ? <ShieldCheck size={17} /> : <KeyRound size={17} />}
-          <span><small>OpenAI API</small><strong>{connected ? "已安全连接" : "连接你的 Key"}</strong></span>
+          <span><small>{connection?.label || "模型服务"}</small><strong>{connected ? "已安全连接" : "选择 API"}</strong></span>
           <i />
         </button>
       </aside>
@@ -543,7 +562,7 @@ export function StudioShell() {
               <span>{view === "studio" ? "我的作品" : "回创作间"}</span>
             </button>
             <button className={`key-button ${connected ? "is-connected" : ""}`} onClick={() => setApiOpen(true)}>
-              {connected ? <Check size={16} /> : <KeyRound size={16} />}{connected ? "Key 已连接" : "连接 API Key"}
+              {connected ? <Check size={16} /> : <KeyRound size={16} />}{connected ? `${connection?.label} 已连接` : "连接创作 API"}
             </button>
           </div>
         </header>
@@ -621,7 +640,7 @@ export function StudioShell() {
 
             <section className="how-it-works">
               <div className="how-copy"><small>不用学提示词</small><h2>三步，把角色变成你的内容资产</h2></div>
-              <div className="step"><b>1</b><span><strong>上传并确认锚点画风</strong><small>原图直用，或用 GPT Image 2 转换</small></span></div>
+              <div className="step"><b>1</b><span><strong>上传并确认锚点画风</strong><small>原图直用，或用已连接的图片模型转换</small></span></div>
               <div className="step-line" />
               <div className="step"><b>2</b><span><strong>回答短问卷</strong><small>主题、数量、用途就够了</small></span></div>
               <div className="step-line" />
@@ -770,14 +789,14 @@ export function StudioShell() {
         </div>
       )}
 
-      {apiOpen && <ApiKeyModal connected={connected} onClose={() => { setApiOpen(false); setResumeAnchorAfterApi(false); }} onConnect={(value) => { rememberApiKey(value); setApiKey(value); if (resumeAnchorAfterApi) { setResumeAnchorAfterApi(false); setAnchorOpen(true); } }} onDisconnect={() => { forgetApiKey(); setApiKey(""); }} />}
+      {apiOpen && <ProviderModal connection={connection} onClose={() => { setApiOpen(false); setResumeAnchorAfterApi(false); }} onConnect={(value) => { rememberAiConnection(value); setConnection(value); if (resumeAnchorAfterApi) { setResumeAnchorAfterApi(false); setAnchorOpen(true); } }} onDisconnect={() => { forgetAiConnection(); setConnection(undefined); }} />}
       {anchorOpen && (
         <div className="modal-layer" onMouseDown={(event) => { if (event.target === event.currentTarget && !anchorConverting) setAnchorOpen(false); }}>
           <div className="paper-modal anchor-modal">
             <button className="modal-close" onClick={() => setAnchorOpen(false)} disabled={anchorConverting}><X /></button>
             <div className="modal-kicker"><UserRound size={18} /> Image 1 · IP 核心锚点</div>
             <h2>先确认角色，再确认画风</h2>
-            <p>每次上传都要在这里确认一次。选择转换时，GPT Image 2 只改变绘制媒介；身份仍严格来自你的原图。确认后的结果会成为所有创作默认使用的 Image 1。</p>
+            <p>每次上传都要在这里确认一次。选择转换时，当前图片模型只改变绘制媒介；身份仍严格来自你的原图。确认后的结果会成为所有创作默认使用的 Image 1。</p>
             <label className={`anchor-upload ${pendingAnchorUrl ? "has-anchor" : ""}`}>
               {pendingAnchorUrl ? <><img src={pendingAnchorUrl} alt="待确认的身份原图" /><span className="replace-anchor-hint">点击更换身份原图</span></> : <><UploadCloud size={29} /><strong>上传身份原图</strong><span>正面全身、纯色背景最稳定</span></>}
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleAnchorFile(event.target.files?.[0])} />
@@ -790,58 +809,10 @@ export function StudioShell() {
             </div>
             <div className="anchor-tips"><strong>更稳定的小诀窍</strong><span>完整头发或耳朵轮廓 · 标志性服装与配色 · 不要裁掉手脚 · 避免复杂场景</span></div>
             {notice && <div className="notice anchor-notice"><Sparkles size={15} /><span>{notice}</span></div>}
-            <button className="modal-primary" onClick={() => void confirmAnchorStyle()} disabled={!pendingAnchorFile || anchorConverting}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> GPT Image 2 正在转换并核对身份</> : !pendingAnchorFile ? "先上传一张身份原图" : pendingAnchorStyle === "original" ? "确认原图为核心锚点" : connected ? `转换为${getAnchorStylePreset(pendingAnchorStyle).label}并确认` : "连接 API Key 后转换"}</button>
+            <button className="modal-primary" onClick={() => void confirmAnchorStyle()} disabled={!pendingAnchorFile || anchorConverting}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 图片模型正在转换并核对身份</> : !pendingAnchorFile ? "先上传一张身份原图" : pendingAnchorStyle === "original" ? "确认原图为核心锚点" : connected ? `转换为${getAnchorStylePreset(pendingAnchorStyle).label}并确认` : "连接创作 API 后转换"}</button>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ApiKeyModal({ connected, onClose, onConnect, onDisconnect }: { connected: boolean; onClose: () => void; onConnect: (value: string) => void; onDisconnect: () => void }) {
-  const [apiKey, setApiKey] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  async function connect(event: FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError("");
-    try {
-      await validateBrowserApiKey(apiKey.trim());
-      onConnect(apiKey.trim());
-      setApiKey("");
-      onClose();
-    } catch (cause) {
-      setError(browserApiError(cause));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function disconnect() {
-    onDisconnect();
-    onClose();
-  }
-
-  return (
-    <div className="modal-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <form className="paper-modal api-modal" onSubmit={connect}>
-        <button className="modal-close" type="button" onClick={onClose}><X /></button>
-        <div className="key-illustration"><div><KeyRound size={30} /></div><span>••••••••••••</span></div>
-        <div className="modal-kicker"><ShieldCheck size={18} /> 你的额度，你做主</div>
-        <h2>{connected ? "API Key 已安全连接" : "连接你的 OpenAI API Key"}</h2>
-        <p>为了完全脱离 ChatGPT Sites，Key 现在由这个标签页直接连接 OpenAI，只保存在当前标签页会话中，8 小时后或关闭标签页时自动失效。请只在私人设备使用，不要共享这个标签页。</p>
-        {!connected ? (
-          <>
-            <label className="key-field"><span>OpenAI API Key</span><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /><small><ShieldCheck size={13} /> 生成消耗直接记在你的 OpenAI 账户</small></label>
-            {error && <div className="form-error"><AlertCircle size={15} /> {error}</div>}
-            <button className="modal-primary" disabled={loading || apiKey.length < 20}>{loading ? <><LoaderCircle className="spin" size={17} /> 正在验证</> : "连接并验证"}</button>
-          </>
-        ) : (
-          <><div className="connected-panel"><Check size={20} /><div><strong>连接正常</strong><span>Key 仅保留在当前标签页会话</span></div></div><button className="modal-primary" type="button" onClick={onClose}>继续创作</button><button className="disconnect-button" type="button" onClick={disconnect}>断开当前 Key</button></>
-        )}
-      </form>
     </div>
   );
 }
