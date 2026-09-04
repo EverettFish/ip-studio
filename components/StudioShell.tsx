@@ -53,6 +53,7 @@ import {
   rememberAiConnection,
   restoreAiConnection,
   type AiConnection,
+  usesApiPlanning,
 } from "@/lib/ai-provider";
 import {
   buildStaticJobs,
@@ -170,6 +171,7 @@ export function StudioShell() {
   const [artworks, setArtworks] = useState<ArtworkRecord[]>([]);
   const [connection, setConnection] = useState<AiConnection>();
   const [apiOpen, setApiOpen] = useState(false);
+  const [apiAuthorizationMessage, setApiAuthorizationMessage] = useState("");
   const [anchorOpen, setAnchorOpen] = useState(false);
   const [pendingAnchorFile, setPendingAnchorFile] = useState<File>();
   const [pendingAnchorStyle, setPendingAnchorStyle] = useState<AnchorStyleId>("original");
@@ -224,13 +226,15 @@ export function StudioShell() {
       oauthHandled.current = true;
       setApiOpen(true);
       setNotice("正在完成 TokenDance 授权…");
+      setApiAuthorizationMessage("正在交换 TokenDance 授权，请稍候…");
       void completeTokenDanceAuthorization()
         .then((authorized) => {
           rememberAiConnection(authorized);
           setConnection(authorized);
           setNotice("TokenDance 已连接，可以查看余额并开始创作。");
+          setApiAuthorizationMessage("TokenDance 授权成功。请先测试生成 1 张，确认你的账户可用。");
         })
-        .catch((cause) => setNotice(browserApiError(cause)));
+        .catch((cause) => { setNotice(browserApiError(cause)); setApiAuthorizationMessage(`授权未完成：${browserApiError(cause)} 请在当前标签页重新授权。`); });
     }
   }, []);
 
@@ -547,7 +551,7 @@ export function StudioShell() {
 
         <button className={`api-mini ${connected ? "connected" : ""}`} onClick={() => setApiOpen(true)}>
           {connected ? <ShieldCheck size={17} /> : <KeyRound size={17} />}
-          <span><small>{connection?.label || "模型服务"}</small><strong>{connected ? "已安全连接" : "选择 API"}</strong></span>
+          <span><small>{connection?.label || "模型服务"}</small><strong>{connected ? "已配置 · 可测试" : "选择 API"}</strong></span>
           <i />
         </button>
       </aside>
@@ -562,7 +566,7 @@ export function StudioShell() {
               <span>{view === "studio" ? "我的作品" : "回创作间"}</span>
             </button>
             <button className={`key-button ${connected ? "is-connected" : ""}`} onClick={() => setApiOpen(true)}>
-              {connected ? <Check size={16} /> : <KeyRound size={16} />}{connected ? `${connection?.label} 已连接` : "连接创作 API"}
+              {connected ? <Check size={16} /> : <KeyRound size={16} />}{connected ? `${connection?.label} 已配置` : "连接创作 API"}
             </button>
           </div>
         </header>
@@ -701,6 +705,7 @@ export function StudioShell() {
 
               {active.needsArticle && (
                 <section className="form-section">
+                  <div className="notice">{connection && usesApiPlanning(connection) ? `AI 文章规划：${connection.planningModel}，与生图模型分别调用。` : "本地分段模式：不需要文字 API，不做 AI 摘要。按原文分段交给生图模型；可在 API 配置中另配文字规划。"}</div>
                   <div className="form-title"><b>1</b><div><strong>把文章交给 Studio</strong><small>支持 TXT、Markdown、DOCX，最多读取 6 万字</small></div></div>
                   <div className={`article-drop ${article ? "has-content" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={onArticleDrop}>
                     <textarea value={article} onChange={(event) => { setArticle(event.target.value.slice(0, 60000)); setArticleName(""); }} placeholder="把文章粘贴在这里，或拖一个文件进来…" />
@@ -789,7 +794,7 @@ export function StudioShell() {
         </div>
       )}
 
-      {apiOpen && <ProviderModal connection={connection} onClose={() => { setApiOpen(false); setResumeAnchorAfterApi(false); }} onConnect={(value) => { rememberAiConnection(value); setConnection(value); if (resumeAnchorAfterApi) { setResumeAnchorAfterApi(false); setAnchorOpen(true); } }} onDisconnect={() => { forgetAiConnection(); setConnection(undefined); }} />}
+      {apiOpen && <ProviderModal key={connection ? "saved" : "new"} connection={connection} authorizationMessage={apiAuthorizationMessage} onClose={() => { setApiOpen(false); setResumeAnchorAfterApi(false); }} onConnect={(value) => { rememberAiConnection(value); setConnection(value); if (resumeAnchorAfterApi) { setResumeAnchorAfterApi(false); setApiOpen(false); setAnchorOpen(true); } }} onDisconnect={() => { forgetAiConnection(); setConnection(undefined); setApiAuthorizationMessage(""); }} />}
       {anchorOpen && (
         <div className="modal-layer" onMouseDown={(event) => { if (event.target === event.currentTarget && !anchorConverting) setAnchorOpen(false); }}>
           <div className="paper-modal anchor-modal">

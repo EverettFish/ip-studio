@@ -53,9 +53,10 @@ describe("AI provider connection", () => {
     expect(() => normalizeApiBaseUrl("http://api.example.com/v1")).toThrow(/HTTPS/);
   });
 
-  it("requires both custom model identifiers", () => {
+  it("requires an image model but not a text model for image-only APIs", () => {
     const connection = { ...defaultCustomConnection(), apiKey: "custom-key", baseUrl: "https://api.example.com/v1", imageBaseUrl: "https://api.example.com/v1" };
-    expect(() => validateConnectionFields(connection)).toThrow(/规划模型/);
+    expect(() => validateConnectionFields(connection)).toThrow(/生图模型/);
+    expect(validateConnectionFields({ ...connection, imageModel: "my-image-model" }).planningMode).toBe("local");
   });
 
   it("converts TokenDance micro-yuan values", () => {
