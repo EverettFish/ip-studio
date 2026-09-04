@@ -36,6 +36,17 @@ npm run build
 - 角色锚点和作品保存在当前浏览器的 IndexedDB。
 - 仓库不保存用户上传的锚点、文章、参考图或生成作品。
 
+## API 怎么填写
+
+- 生图必须配置有图生图/参考图编辑能力的模型。聊天模型或只能识图的模型不能代替生图模型。
+- TokenDance：在当前标签页完成授权；生图选择 Seedream 5.0 Lite / Pro。可先点“检查 TokenDance 网络”，不产生费用。
+- 其他 API：依次填写生图 Key、Base URL、精确模型 ID 和参考图协议。支持 OpenAI `/images/edits` 与 Ark `/images/generations`；不支持任意厂商私有协议。
+- 只有生图 API：选择“本地按原文分段”，头像、贴纸等无需文字模型；文章类按原文分段交给生图模型，不执行 AI 摘要。
+- 需要 AI 文章规划：单独启用文字模型。文字服务可以用另一家地址和 Key，不会把生图 Key 隐式转交给另一家。
+- 自定义接口缺少 `/models` 不阻止保存。保存不代表出图成功，可明确确认后执行“测试生成 1 张”（会消耗用户额度）。
+- 自定义服务必须支持浏览器 CORS；只允许服务端调用的 API 无法在纯静态站直接连接。
+- 网站和单文件版共用 `lib/security-policy.json`：仅网络连接允许 HTTPS 自配地址，脚本等其他 CSP 限制保持不变。
+
 ## 协作与发布
 
 完整源码位于 `main`。新改动应从短期功能分支提交 Pull Request；PR 会自动运行测试、代码检查和生产构建。合并到 `main` 后，GitHub Actions 自动构建并发布到 `ipstudio.fun`，不需要手动上传 `index.html`。

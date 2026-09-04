@@ -14,6 +14,8 @@ export type AiConnection = {
   imageModel: string;
   planningProtocol: PlanningApiProtocol;
   imageProtocol: ImageApiProtocol;
+  planningMode?: "local" | "api";
+  planningApiKey?: string;
 };
 
 export type TokenDanceBalance = {
@@ -41,6 +43,7 @@ type PendingTokenDanceOAuth = {
   planningModel: string;
   imageModel: string;
   code?: string;
+  planningMode?: "local" | "api";
 };
 
 const CONNECTION_STORAGE = "ip-studio-ai-connection-v2";
@@ -65,6 +68,7 @@ export function defaultOpenAiConnection(apiKey = ""): AiConnection {
     imageModel: "gpt-image-2",
     planningProtocol: "openai-responses",
     imageProtocol: "openai-edits",
+    planningMode: "api",
   };
 }
 
@@ -79,6 +83,7 @@ export function defaultTokenDanceConnection(apiKey = "", planningModel = "seed-2
     imageModel,
     planningProtocol: "openai-chat-completions",
     imageProtocol: "ark-generations",
+    planningMode: "api",
   };
 }
 
@@ -93,6 +98,7 @@ export function defaultCustomConnection(): AiConnection {
     imageModel: "",
     planningProtocol: "openai-chat-completions",
     imageProtocol: "openai-edits",
+    planningMode: "local",
   };
 }
 
@@ -132,7 +138,7 @@ export function forgetAiConnection(): void {
 }
 
 export function normalizeApiBaseUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
+  const trimmed = value.trim().replace(/\/+$/, "").replace(/\/(?:images\/(?:edits|generations)|chat\/completions|responses|models)$/, "");
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
@@ -151,17 +157,76 @@ export function normalizeApiBaseUrl(value: string): string {
 
 export function validateConnectionFields(connection: AiConnection): AiConnection {
   if (connection.apiKey.trim().length < 8) throw new Error("请填写有效的 API Key。");
-  if (!connection.planningModel.trim()) throw new Error("请填写规划模型 ID。");
-  if (!connection.imageModel.trim()) throw new Error("请填写图片模型 ID。");
-  return {
+  if (!connection.imageModel.trim()) throw new Error("请填写生图模型 ID，不是聊天模型名称。");
+  assertImageModel(connection.imageModel);
+  const imageBaseUrl = normalizeApiBaseUrl(connection.imageBaseUrl || connection.baseUrl);
+  const apiPlanning = usesApiPlanning(connection);
+  if (apiPlanning && !connection.planningModel.trim()) throw new Error("启用 AI 文章规划后，请填写文字模型 ID；只有生图 API 可改用本地分段。");
+  const checked = {
     ...connection,
     apiKey: connection.apiKey.trim(),
-    baseUrl: normalizeApiBaseUrl(connection.baseUrl),
-    imageBaseUrl: normalizeApiBaseUrl(connection.imageBaseUrl || connection.baseUrl),
+    baseUrl: apiPlanning ? normalizeApiBaseUrl(connection.baseUrl) : imageBaseUrl,
+    imageBaseUrl,
     planningModel: connection.planningModel.trim(),
     imageModel: connection.imageModel.trim(),
+    planningApiKey: connection.planningApiKey?.trim(),
     label: connection.label.trim() || "自定义兼容 API",
   };
+  if (apiPlanning) getPlanningApiKey(checked);
+  return checked;
+}
+
+export function usesApiPlanning(connection: AiConnection): boolean {
+  return connection.planningMode ? connection.planningMode === "api" : Boolean(connection.planningModel);
+}
+
+export function getPlanningApiKey(connection: AiConnection): string {
+  if (connection.planningApiKey?.trim()) return connection.planningApiKey.trim();
+  if (new URL(connection.baseUrl).origin !== new URL(connection.imageBaseUrl).origin) {
+    throw new Error("文字规划使用了另一家服务，请单独填写文字 API Key；不会把生图 Key 自动发送给另一家。");
+  }
+  return connection.apiKey;
+}
+
+export type AvailableModel = { id: string; supported_protocols?: string[] };
+
+export function assertImageModel(id: string, model?: AvailableModel, protocol?: ImageApiProtocol): void {
+  const name = id.trim().toLowerCase().split("/").at(-1) || "";
+  // Reject identifiable text models, but do not guess the capabilities of custom aliases.
+  if (/^(?:deepseek-(?:chat|reasoner|v\d|r\d)|seed-\d|claude-|gpt-(?!image)[345]|o[134](?:-|$)|glm-\d|qwen\d(?!.*image))/.test(name)) {
+    throw new Error(`「${id}」是文字/对话模型，不能用于生图。请填写支持参考图的生图模型 ID（例如 gpt-image-2 或 Seedream），文字模型请放在文章规划中。`);
+  }
+  if (model?.supported_protocols?.length && protocol) {
+    const required = protocol === "ark-generations" ? "ark:image-generations" : "openai:image-edits";
+    if (!model.supported_protocols.includes(required)) {
+      throw new Error(`「${id}」的公开能力不支持当前参考图协议。请选择支持图生图/图片编辑的模型，或切换正确协议。`);
+    }
+  }
+}
+
+export async function inspectImageModel(connection: AiConnection): Promise<string> {
+  const checked = validateConnectionFields(connection);
+  const url = checked.provider === "tokendance" ? `${TOKENDANCE_OPENAI_BASE_URL}/models` : `${checked.imageBaseUrl}/models`;
+  const response = await fetch(url, {
+    headers: checked.provider === "tokendance" ? {} : { Authorization: `Bearer ${checked.apiKey}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (response.status === 404 || response.status === 405) return "服务商没有模型列表接口，可以保存配置；请用下方单张测试确认生图能力。";
+  if (!response.ok) throw await readError(response);
+  const body = await response.json() as { data?: AvailableModel[] };
+  if (!Array.isArray(body.data)) return "未获得标准模型列表；保存后可测试生成 1 张。";
+  const model = body.data.find((item) => item.id === checked.imageModel);
+  if (!model) throw new Error(`模型列表中没有「${checked.imageModel}」。请复制服务商提供的精确生图模型 ID，注意大小写。`);
+  assertImageModel(model.id, model, checked.imageProtocol);
+  return model.supported_protocols?.length ? "模型列表与参考图协议匹配；尚未实际生成图片。" : "模型 ID 存在；服务商未提供能力信息，仍需单张测试确认图生图。";
+}
+
+export async function checkTokenDanceNetwork(): Promise<string> {
+  const response = await fetch(`${TOKENDANCE_OPENAI_BASE_URL}/models`, { signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw await readError(response);
+  const body = await response.json() as { data?: AvailableModel[] };
+  if (!Array.isArray(body.data)) throw new Error("TokenDance 返回的模型目录格式异常。");
+  return "TokenDance 网络可达，可继续授权。授权需在当前标签页完成。";
 }
 
 export class ProviderApiError extends Error {
@@ -206,8 +271,11 @@ export async function validateAiConnection(connection: AiConnection): Promise<Ai
     await getTokenDanceBalance(checked);
     return checked;
   }
-  const response = await fetch(`${checked.baseUrl}/models`, {
+  // A dedicated image gateway is not required to implement /models or any text API.
+  if (checked.provider === "custom") return checked;
+  const response = await fetch(`${checked.imageBaseUrl}/models`, {
     headers: { Authorization: `Bearer ${checked.apiKey}` },
+    signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw await readError(response);
   return checked;
@@ -228,8 +296,9 @@ async function sha256Base64Url(value: string): Promise<string> {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export async function beginTokenDanceAuthorization(options?: { planningModel?: string; imageModel?: string }): Promise<void> {
+export async function beginTokenDanceAuthorization(options?: { planningModel?: string; imageModel?: string; planningMode?: "local" | "api" }): Promise<void> {
   if (typeof window === "undefined") return;
+  if (!/^https?:$/.test(new URL(window.location.href).protocol)) throw new Error("OAuth 授权需要通过网站地址打开，请在 ipstudio.fun 使用；本地 HTML 文件可手动配置 Key。");
   const verifier = randomBase64Url(48);
   const state = randomBase64Url(24);
   const challenge = await sha256Base64Url(verifier);
@@ -239,6 +308,7 @@ export async function beginTokenDanceAuthorization(options?: { planningModel?: s
     createdAt: Date.now(),
     planningModel: options?.planningModel || "seed-2.0-mini",
     imageModel: options?.imageModel || "seedream-5.0-lite",
+    planningMode: options?.planningMode || "api",
   };
   window.sessionStorage.setItem(TOKENDANCE_OAUTH_STORAGE, JSON.stringify(pending));
 
@@ -319,7 +389,7 @@ export async function completeTokenDanceAuthorization(): Promise<AiConnection> {
   const body = await result.json() as { key?: string };
   if (!body.key) throw new Error("TokenDance 没有返回可用的 API Key，请重新授权。");
   window.sessionStorage.removeItem(TOKENDANCE_OAUTH_STORAGE);
-  return defaultTokenDanceConnection(body.key, pending.planningModel, pending.imageModel);
+  return { ...defaultTokenDanceConnection(body.key, pending.planningModel, pending.imageModel), planningMode: pending.planningMode || "api" };
 }
 
 export async function getTokenDanceBalance(connection: AiConnection): Promise<TokenDanceBalance> {

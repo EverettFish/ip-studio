@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import security from "@/lib/security-policy.json";
 
 export const metadata: Metadata = {
   title: "IP Studio｜一个角色，长出整个内容世界",
@@ -13,7 +14,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         <meta
           httpEquiv="Content-Security-Policy"
-          content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.openai.com; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:"
+          content={security.csp}
         />
         <meta name="referrer" content="no-referrer" />
       </head>

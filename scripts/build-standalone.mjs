@@ -5,6 +5,7 @@ import path from "node:path";
 const projectRoot = process.cwd();
 const publicRoot = path.join(projectRoot, "public");
 const outputRoot = path.join(projectRoot, "standalone");
+const security = JSON.parse(await readFile(path.join(projectRoot, "lib/security-policy.json"), "utf8"));
 
 async function listFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -59,7 +60,7 @@ const html = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="上传一次角色锚点，用短问卷一键生成文章配图、信息图、贴纸、头像与更多个人 IP 素材。" />
   <meta name="referrer" content="no-referrer" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.openai.com; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:" />
+  <meta http-equiv="Content-Security-Policy" content="${security.csp}" />
   <link rel="icon" href="${favicon}" />
   <title>IP Studio｜一个角色，长出整个内容世界</title>
   <style>${cssOutput.text}</style>
