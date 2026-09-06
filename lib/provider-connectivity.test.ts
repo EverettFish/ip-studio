@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import security from "./security-policy.json";
 import { assertImageModel, beginTokenDanceAuthorization, completeTokenDanceAuthorization, defaultCustomConnection, defaultTokenDanceConnection, getPlanningApiKey, inspectImageModel, normalizeApiBaseUrl, validateAiConnection, validateConnectionFields } from "./ai-provider";
-import { generateBrowserImage, planBrowserJobs } from "./browser-openai";
+import { generateBrowserImage, generateBrowserImageResult, planBrowserJobs } from "./browser-openai";
 import { planLocalArticle } from "./local-planner";
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j4oQAAAAASUVORK5CYII=";
@@ -91,6 +91,15 @@ describe("production connectivity regression", () => {
     expect(body.image).toHaveLength(2);
     expect(body.image[0]).toBe(`data:image/png;base64,${png}`);
     expect(result.type).toBe("image/png");
+  });
+
+  it("returns provider-reported image token usage without inventing missing values", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }], usage: { output_tokens: 1756, total_tokens: 2850, generated_images: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const blob = new Blob([Buffer.from(png, "base64")], { type: "image/png" });
+    const result = await generateBrowserImageResult({ connection: defaultTokenDanceConnection("td-test-key"), anchor: { id: "primary", name: "anchor.png", blob, updatedAt: 1 }, quality: "low", job: { id: "usage-test", title: "用量测试", prompt: "Keep image 1 identity", size: "1024x1024", background: "opaque" } });
+    expect(result.blob.type).toBe("image/png");
+    expect(result.usage).toEqual({ inputTokens: undefined, outputTokens: 1756, totalTokens: 2850, generatedImages: 1 });
   });
 
   it("sends a custom image-only request as multipart edits, without text requests", async () => {

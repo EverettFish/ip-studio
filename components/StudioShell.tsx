@@ -41,18 +41,24 @@ import type {
   AnchorStyleId,
   ArtworkRecord,
   GenerationJob,
+  GenerationUsage,
   JobState,
   WorkflowConfig,
   WorkflowId,
 } from "@/lib/types";
 import { ANCHOR_STYLE_PRESETS, getAnchorStylePreset } from "@/lib/anchor-styles";
 import {
+  assertImageModel,
   completeTokenDanceAuthorization,
   forgetAiConnection,
+  getTokenDanceBalance,
   hasTokenDanceAuthorizationCallback,
+  imageModelOptions,
+  microYuanToYuan,
   rememberAiConnection,
   restoreAiConnection,
   type AiConnection,
+  type TokenDanceBalance,
   usesApiPlanning,
 } from "@/lib/ai-provider";
 import {
@@ -74,8 +80,9 @@ import {
 import {
   browserApiError,
   convertBrowserAnchor,
-  generateBrowserImage,
+  generateBrowserImageResult,
   planBrowserJobs,
+  type GenerationResult,
 } from "@/lib/browser-openai";
 import { ProviderModal } from "@/components/ProviderModal";
 
@@ -189,8 +196,14 @@ export function StudioShell() {
   const [jobs, setJobs] = useState<JobState[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [tokenDanceBalance, setTokenDanceBalance] = useState<TokenDanceBalance>();
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [runImageModel, setRunImageModel] = useState("");
+  const [stopPending, setStopPending] = useState(false);
+  const [roundUsage, setRoundUsage] = useState<{ model: string; totalTokens: number; completed: number; usageAvailable: boolean; spentMicros?: number }>();
   const previewUrls = useRef(new Set<string>());
   const oauthHandled = useRef(false);
+  const stopRequested = useRef(false);
   const anchorUrl = useBlobUrl(anchor?.blob);
   const pendingAnchorUrl = useBlobUrl(pendingAnchorFile);
   const connected = Boolean(connection?.apiKey);
@@ -237,6 +250,22 @@ export function StudioShell() {
         .catch((cause) => { setNotice(browserApiError(cause)); setApiAuthorizationMessage(`授权未完成：${browserApiError(cause)} 请在当前标签页重新授权。`); });
     }
   }, []);
+
+  useEffect(() => {
+    setRunImageModel(connection?.imageModel || "");
+    let cancelled = false;
+    if (connection?.provider !== "tokendance") {
+      setTokenDanceBalance(undefined);
+      setBalanceLoading(false);
+      return;
+    }
+    setBalanceLoading(true);
+    void getTokenDanceBalance(connection)
+      .then((next) => { if (!cancelled) setTokenDanceBalance(next); })
+      .catch(() => { if (!cancelled) setTokenDanceBalance(undefined); })
+      .finally(() => { if (!cancelled) setBalanceLoading(false); });
+    return () => { cancelled = true; };
+  }, [connection]);
 
   useEffect(() => () => {
     previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
@@ -395,11 +424,39 @@ export function StudioShell() {
     return planBrowserJobs({ connection, workflow: activeId, article, config: activeConfig });
   }
 
-  async function generateOne(target: GenerationJob): Promise<Blob> {
+  async function refreshStudioBalance(target = connection): Promise<TokenDanceBalance | undefined> {
+    if (target?.provider !== "tokendance") return undefined;
+    setBalanceLoading(true);
+    try {
+      const next = await getTokenDanceBalance(target);
+      setTokenDanceBalance(next);
+      return next;
+    } catch {
+      return undefined;
+    } finally {
+      setBalanceLoading(false);
+    }
+  }
+
+  function addRoundUsage(usage?: GenerationUsage) {
+    setRoundUsage((current) => current ? {
+      ...current,
+      completed: current.completed + 1,
+      totalTokens: current.totalTokens + (usage?.totalTokens || 0),
+      usageAvailable: current.usageAvailable || typeof usage?.totalTokens === "number",
+    } : current);
+  }
+
+  function requestStop() {
+    stopRequested.current = true;
+    setStopPending(true);
+    setNotice("已收到停止请求：当前正在生成的这一张会完成，尚未开始的图片不会再发送给服务商，也不会继续扣费。");
+  }
+
+  async function generateOne(target: GenerationJob, runConnection: AiConnection): Promise<GenerationResult> {
     if (!anchor) throw new Error("请先上传角色锚点。");
-    if (!connection) throw new Error("请先连接创作 API。");
-    return generateBrowserImage({
-      connection,
+    return generateBrowserImageResult({
+      connection: runConnection,
       anchor,
       job: target,
       quality,
@@ -426,20 +483,49 @@ export function StudioShell() {
       return;
     }
 
-    setBusy(true);
-    setNotice(active.needsArticle ? "正在读文章，先把内容整理成画面清单…" : "已开始准备创作清单…");
+    const model = runImageModel.trim();
     try {
+      assertImageModel(model);
+    } catch (error) {
+      setNotice(browserApiError(error));
+      return;
+    }
+    const runConnection = { ...connection!, imageModel: model };
+
+    stopRequested.current = false;
+    setStopPending(false);
+    setBusy(true);
+    setRoundUsage({ model, totalTokens: 0, completed: 0, usageAvailable: false });
+    setNotice(active.needsArticle ? "正在读文章，先把内容整理成画面清单…" : "已开始准备创作清单…");
+    let startingBalance: TokenDanceBalance | undefined;
+    try {
+      startingBalance = await refreshStudioBalance(runConnection);
       const planned = await planJobs();
       clearJobPreviews();
       const state: JobState[] = planned.map((item) => ({ ...item, status: "queued" }));
       setJobs(state);
+      if (stopRequested.current) {
+        setJobs((current) => current.map((item) => ({ ...item, status: "stopped" })));
+        const endingBalance = await refreshStudioBalance(runConnection);
+        if (startingBalance && endingBalance) {
+          const spentMicros = Math.max(0, startingBalance.balance - endingBalance.balance);
+          setRoundUsage((current) => current ? { ...current, spentMicros } : current);
+        }
+        setNotice("已停止：创作清单已经整理好，但没有发送任何生图请求。");
+        return;
+      }
       setNotice(`清单准备好了，共 ${state.length} 张。现在逐张创作。`);
 
       for (let index = 0; index < planned.length; index += 1) {
+        if (stopRequested.current) {
+          setJobs((current) => current.map((item) => item.status === "queued" ? { ...item, status: "stopped" } : item));
+          break;
+        }
         const target = planned[index];
         setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "generating" } : item));
         try {
-          const blob = await generateOne(target);
+          const result = await generateOne(target, runConnection);
+          const blob = result.blob;
           const image = createPreviewUrl(blob);
           await saveArtwork({
             id: target.id,
@@ -448,32 +534,67 @@ export function StudioShell() {
             blob,
             createdAt: Date.now() + index,
           });
-          setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image, imageBlob: blob } : item));
+          setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image, imageBlob: blob, usage: result.usage } : item));
+          addRoundUsage(result.usage);
         } catch (error) {
           const message = browserApiError(error);
           setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: message } : item));
         }
+        if (startingBalance) {
+          const liveBalance = await refreshStudioBalance(runConnection);
+          if (liveBalance) {
+            const spentMicros = Math.max(0, startingBalance.balance - liveBalance.balance);
+            setRoundUsage((current) => current ? { ...current, spentMicros } : current);
+          }
+        }
+      }
+      const endingBalance = await refreshStudioBalance(runConnection);
+      if (startingBalance && endingBalance) {
+        const spentMicros = Math.max(0, startingBalance.balance - endingBalance.balance);
+        setRoundUsage((current) => current ? { ...current, spentMicros } : current);
       }
       setArtworks(await listArtworks());
-      setNotice("这一轮已经完成。失败的单张可以直接重试，成功作品已留在本机作品簿。");
+      setNotice(stopRequested.current ? "已按你的要求停止后续生成；已完成的作品仍保存在作品簿中。" : "这一轮已经完成。失败的单张可以直接重试，成功作品已留在本机作品簿。");
     } catch (error) {
+      const endingBalance = await refreshStudioBalance(runConnection);
+      if (startingBalance && endingBalance) {
+        const spentMicros = Math.max(0, startingBalance.balance - endingBalance.balance);
+        setRoundUsage((current) => current ? { ...current, spentMicros } : current);
+      }
       setNotice(browserApiError(error));
     } finally {
       setBusy(false);
+      setStopPending(false);
     }
   }
 
   async function retryJob(target: JobState) {
+    if (!connection) return;
+    const model = runImageModel.trim();
+    try {
+      assertImageModel(model);
+    } catch (error) {
+      setNotice(browserApiError(error));
+      return;
+    }
+    const runConnection = { ...connection, imageModel: model };
     setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "generating", error: undefined } : item));
     try {
+      const startingBalance = await refreshStudioBalance(runConnection);
       if (target.image?.startsWith("blob:")) {
         URL.revokeObjectURL(target.image);
         previewUrls.current.delete(target.image);
       }
-      const blob = await generateOne(target);
+      const result = await generateOne(target, runConnection);
+      const blob = result.blob;
       const image = createPreviewUrl(blob);
       await saveArtwork({ id: target.id, workflow: activeId, title: target.title, blob, createdAt: Date.now() });
-      setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image, imageBlob: blob } : item));
+      setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "done", image, imageBlob: blob, usage: result.usage } : item));
+      addRoundUsage(result.usage);
+      const endingBalance = await refreshStudioBalance(runConnection);
+      if (startingBalance && endingBalance) {
+        setRoundUsage((current) => current ? { ...current, spentMicros: (current.spentMicros || 0) + Math.max(0, startingBalance.balance - endingBalance.balance) } : current);
+      }
       setArtworks(await listArtworks());
     } catch (error) {
       setJobs((current) => current.map((item) => item.id === target.id ? { ...item, status: "error", error: browserApiError(error) } : item));
@@ -566,6 +687,7 @@ export function StudioShell() {
         <button className={`api-mini ${connected ? "connected" : ""}`} onClick={() => setApiOpen(true)}>
           {connected ? <ShieldCheck size={17} /> : <KeyRound size={17} />}
           <span><small>{connection?.label || "模型服务"}</small><strong>{connected ? "已配置 · 可测试" : "选择 API"}</strong></span>
+          {connection?.provider === "tokendance" && <b className="api-balance">{tokenDanceBalance ? `余额 ¥${microYuanToYuan(tokenDanceBalance.balance).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : balanceLoading ? "余额读取中" : "余额暂不可用"}</b>}
           <i />
         </button>
       </aside>
@@ -763,10 +885,23 @@ export function StudioShell() {
                 </div>
               </section>
 
-              <section className="quality-row">
-                <div><strong>出图质量</strong><small>中等适合预览，高等适合交付</small></div>
-                <div className="segmented">
-                  {(["low", "medium", "high"] as const).map((value) => <button key={value} className={quality === value ? "active" : ""} onClick={() => setQuality(value)}>{value === "low" ? "草稿" : value === "medium" ? "标准" : "精细"}</button>)}
+              <section className="run-settings-row">
+                <label className="run-model-field">
+                  <span>本轮生图模型</span>
+                  {connection?.provider === "tokendance" ? (
+                    <select value={runImageModel} disabled={busy} onChange={(event) => setRunImageModel(event.target.value)}>
+                      {imageModelOptions(connection).map((model) => <option value={model} key={model}>{model === "seedream-5.0-lite" ? "Seedream 5.0 Lite · 图生图" : model === "seedream-5.0-pro" ? "Seedream 5.0 Pro · 图生图" : model}</option>)}
+                    </select>
+                  ) : (
+                    <><input list="run-image-models" value={runImageModel} disabled={busy || !connection} placeholder="先连接 API，再填写生图模型 ID" onChange={(event) => setRunImageModel(event.target.value)} /><datalist id="run-image-models">{connection && imageModelOptions(connection).map((model) => <option value={model} key={model} />)}</datalist></>
+                  )}
+                  <small>只影响这一轮，不改动 API 配置；必须选择支持参考图的生图模型。</small>
+                </label>
+                <div className="quality-control">
+                  <div><strong>出图质量</strong><small>中等适合预览，高等适合交付</small></div>
+                  <div className="segmented">
+                    {(["low", "medium", "high"] as const).map((value) => <button type="button" disabled={busy} key={value} className={quality === value ? "active" : ""} onClick={() => setQuality(value)}>{value === "low" ? "草稿" : value === "medium" ? "标准" : "精细"}</button>)}
+                  </div>
                 </div>
               </section>
 
@@ -782,14 +917,15 @@ export function StudioShell() {
               {jobs.length > 0 && (
                 <section className="job-section">
                   <div className="job-heading"><div><strong>这一轮的创作清单</strong><small>{jobs.filter((item) => item.status === "done").length}/{jobs.length} 已完成</small></div>{jobs.some((item) => item.status === "done") && <button onClick={() => void downloadRound()}><Download size={15} /> 打包下载</button>}</div>
+                  {roundUsage && <div className="generation-usage"><span><b>模型</b>{roundUsage.model}</span><span><b>已生成</b>{roundUsage.completed}/{jobs.length} 张</span>{roundUsage.usageAvailable && <span><b>Token</b>{roundUsage.totalTokens.toLocaleString()}</span>}{typeof roundUsage.spentMicros === "number" && <span><b>本轮消耗</b>¥{microYuanToYuan(roundUsage.spentMicros).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>}{!busy && !roundUsage.usageAvailable && connection?.provider !== "tokendance" && <small>服务商没有返回用量，请到对应后台查看实际费用。</small>}</div>}
                   <div className="job-grid">
                     {jobs.map((item) => (
                       <article className={`job-card is-${item.status}`} key={item.id}>
                         <div className="job-preview">
                           {item.image ? <img src={item.image} alt={item.title} /> : item.status === "generating" ? <LoaderCircle className="spin" size={25} /> : item.status === "error" ? <AlertCircle size={23} /> : <FileImage size={22} />}
                         </div>
-                        <div className="job-copy"><strong>{item.title}</strong><small>{item.status === "queued" ? "排队中" : item.status === "generating" ? "正在画" : item.status === "done" ? "已保存" : item.error}</small></div>
-                        {item.status === "error" && <button onClick={() => void retryJob(item)}>重试</button>}
+                        <div className="job-copy"><strong>{item.title}</strong><small>{item.status === "queued" ? "排队中" : item.status === "generating" ? "正在画 · 当前请求会完成" : item.status === "done" ? `${item.usage?.totalTokens ? `${item.usage.totalTokens.toLocaleString()} tokens · ` : ""}已保存` : item.status === "stopped" ? "已停止 · 未发送请求" : item.error}</small></div>
+                        {item.status === "error" && <button disabled={busy} onClick={() => void retryJob(item)}>重试</button>}
                         {item.image && <a href={item.image} download={`${item.title}.png`} aria-label={`下载${item.title}`}><Download size={15} /></a>}
                       </article>
                     ))}
@@ -800,8 +936,8 @@ export function StudioShell() {
 
             <footer className="drawer-footer">
               <div><small>预计生成</small><strong>{estimatedCount || (activeId === "infographic" && activeConfig.pages === "auto" ? "自动判断" : 0)} {typeof estimatedCount === "number" && estimatedCount > 0 ? "张" : ""}</strong></div>
-              <button className="generate-button" disabled={busy} onClick={() => void startGeneration()}>
-                {busy ? <><LoaderCircle className="spin" size={18} /> 正在创作，请别关掉</> : <><WandSparkles size={18} /> 一键生成整套</>}
+              <button className={`generate-button ${busy ? "stop-button" : ""}`} disabled={busy && stopPending} onClick={() => busy ? requestStop() : void startGeneration()}>
+                {busy ? stopPending ? <><Check size={18} /> 将在当前图片后停止</> : <><X size={18} /> 停止后续生成</> : <><WandSparkles size={18} /> 一键生成整套</>}
               </button>
             </footer>
           </aside>

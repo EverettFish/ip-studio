@@ -6,12 +6,40 @@ import { assertImageModel, getPlanningApiKey, ProviderApiError, usesApiPlanning,
 import { planLocalArticle } from "./local-planner";
 import { composeGenerationPrompt, generationPolicy, normalizeGenerationStyle } from "./generation-policy";
 import { base64PngToBlob } from "./image-result";
-import type { AnchorRecord, AnchorStyleId, GenerationJob, WorkflowConfig } from "./types";
+import type { AnchorRecord, AnchorStyleId, GenerationJob, GenerationUsage, WorkflowConfig } from "./types";
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 type PlannedJob = Omit<GenerationJob, "id">;
+
+export type GenerationResult = { blob: Blob; usage?: GenerationUsage };
+
+type ImageResponse = {
+  data?: Array<{ b64_json?: string; url?: string }>;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    generated_images?: number;
+  };
+};
+
+function imageUsage(body: ImageResponse): GenerationUsage | undefined {
+  const usage = body.usage;
+  if (!usage) return undefined;
+  const normalized = {
+    inputTokens: finiteUsage(usage.input_tokens),
+    outputTokens: finiteUsage(usage.output_tokens),
+    totalTokens: finiteUsage(usage.total_tokens),
+    generatedImages: finiteUsage(usage.generated_images),
+  };
+  return Object.values(normalized).some((value) => value !== undefined) ? normalized : undefined;
+}
+
+function finiteUsage(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
 
 function client(connection: AiConnection, image = false) {
   return new OpenAI({
@@ -131,19 +159,33 @@ export async function generateBrowserImage(args: {
   quality: "low" | "medium" | "high";
   source?: File;
 }): Promise<Blob> {
+  return (await generateBrowserImageResult(args)).blob;
+}
+
+export async function generateBrowserImageResult(args: {
+  connection: AiConnection;
+  anchor: AnchorRecord;
+  job: GenerationJob;
+  quality: "low" | "medium" | "high";
+  source?: File;
+}): Promise<GenerationResult> {
   assertImageModel(args.connection.imageModel);
   const anchorFile = await checkedFile(new File([args.anchor.blob], args.anchor.name, { type: args.anchor.blob.type || "image/png" }));
   const images = [anchorFile];
   if (args.source) images.push(await checkedFile(args.source));
 
   if (args.connection.imageProtocol === "ark-generations") {
-    return generateArkImage(args.connection, images, args.job.prompt, args.job.size);
+    return generateArkImageResult(args.connection, images, args.job.prompt, args.job.size);
   }
 
-  return generateOpenAiImage(args.connection, images, args.job.prompt, args.job.size, args.quality, args.job.background);
+  return generateOpenAiImageResult(args.connection, images, args.job.prompt, args.job.size, args.quality, args.job.background);
 }
 
 async function generateOpenAiImage(connection: AiConnection, images: File[], prompt: string, size: string, quality: string, background: string): Promise<Blob> {
+  return (await generateOpenAiImageResult(connection, images, prompt, size, quality, background)).blob;
+}
+
+async function generateOpenAiImageResult(connection: AiConnection, images: File[], prompt: string, size: string, quality: string, background: string): Promise<GenerationResult> {
   const form = new FormData();
   form.set("model", connection.imageModel);
   form.set("prompt", prompt);
@@ -159,8 +201,11 @@ async function generateOpenAiImage(connection: AiConnection, images: File[], pro
     method: "POST", headers: { Authorization: `Bearer ${connection.apiKey}` }, body: form,
   });
   if (!response.ok) throw await providerResponseError(response);
-  const result = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> };
-  return openAiImageResultToBlob(result.data?.[0], "接口未返回图片。请确认这是生图模型，并支持 /images/edits 参考图编辑。");
+  const result = await response.json() as ImageResponse;
+  return {
+    blob: await openAiImageResultToBlob(result.data?.[0], "接口未返回图片。请确认这是生图模型，并支持 /images/edits 参考图编辑。"),
+    usage: imageUsage(result),
+  };
 }
 
 async function openAiImageResultToBlob(result: { b64_json?: string | null; url?: string | null } | undefined, fallback: string): Promise<Blob> {
@@ -199,6 +244,10 @@ function arkSize(size: string): string {
 }
 
 async function generateArkImage(connection: AiConnection, files: File[], prompt: string, size: string): Promise<Blob> {
+  return (await generateArkImageResult(connection, files, prompt, size)).blob;
+}
+
+async function generateArkImageResult(connection: AiConnection, files: File[], prompt: string, size: string): Promise<GenerationResult> {
   const imageInputs = await Promise.all(files.map(fileToDataUrl));
   const response = await fetch(`${connection.imageBaseUrl}/images/generations`, {
     method: "POST",
@@ -217,13 +266,13 @@ async function generateArkImage(connection: AiConnection, files: File[], prompt:
     }),
   });
   if (!response.ok) throw await providerResponseError(response);
-  const body = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> };
+  const body = await response.json() as ImageResponse;
   const result = body.data?.[0];
-  if (result?.b64_json) return base64PngToBlob(result.b64_json);
+  if (result?.b64_json) return { blob: base64PngToBlob(result.b64_json), usage: imageUsage(body) };
   if (result?.url) {
     const downloaded = await fetch(result.url);
     if (!downloaded.ok) throw new Error("图片已经生成，但下载临时文件失败，请重试这一张。");
-    return downloaded.blob();
+    return { blob: await downloaded.blob(), usage: imageUsage(body) };
   }
   throw new Error("模型没有返回可用图片，请重试这一张。");
 }

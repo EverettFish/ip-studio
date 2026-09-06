@@ -55,11 +55,19 @@ export type GenerationJob = {
   sourceIndex?: number;
 };
 
+export type GenerationUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  generatedImages?: number;
+};
+
 export type JobState = GenerationJob & {
-  status: "queued" | "generating" | "done" | "error";
+  status: "queued" | "generating" | "done" | "error" | "stopped";
   image?: string;
   imageBlob?: Blob;
   error?: string;
+  usage?: GenerationUsage;
 };
 
 export type AnchorRecord = {

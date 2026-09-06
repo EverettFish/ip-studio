@@ -5,7 +5,10 @@ import {
   forgetAiConnection,
   microYuanToYuan,
   getTokenDancePaymentStatus,
+  imageModelOptions,
+  isPaymentExpired,
   normalizeApiBaseUrl,
+  paymentTimestampMs,
   rememberAiConnection,
   restoreAiConnection,
   validateConnectionFields,
@@ -61,6 +64,18 @@ describe("AI provider connection", () => {
 
   it("converts TokenDance micro-yuan values", () => {
     expect(microYuanToYuan(12_500_000)).toBe(12.5);
+  });
+
+  it("treats TokenDance payment timestamps as Unix seconds instead of 1970 milliseconds", () => {
+    const session = { id: "pay-1", amount: 50, status: "pending" as const, paymentUrl: "https://example.test/pay", statusUrl: "/payment/pay-1", expiredAt: 1_786_500_000, createdAt: 1_786_499_000 };
+    expect(paymentTimestampMs(session.expiredAt)).toBe(1_786_500_000_000);
+    expect(isPaymentExpired(session, 1_786_499_999_999)).toBe(false);
+    expect(isPaymentExpired(session, 1_786_500_000_000)).toBe(true);
+  });
+
+  it("offers only image-capable TokenDance run models without replacing a custom model", () => {
+    expect(imageModelOptions({ ...defaultOpenAiConnection("key"), provider: "tokendance", imageModel: "seedream-5.0-lite" })).toEqual(["seedream-5.0-lite", "seedream-5.0-pro"]);
+    expect(imageModelOptions({ ...defaultOpenAiConnection("key"), provider: "custom", imageModel: "my-image-model" })).toEqual(["my-image-model"]);
   });
 
   it("never sends a TokenDance key to an untrusted payment status URL", async () => {
