@@ -173,9 +173,10 @@ img { max-width: 100%; display: block; }
 .api-mini.connected i { background: var(--mint); box-shadow: 0 0 0 3px rgba(79, 182, 159, 0.2); }
 
 .watcha-review-badge {
-  margin-top: auto;
+  width: min(158px, 76%);
+  margin: auto auto 0;
   display: block;
-  border-radius: 9px;
+  border-radius: 999px;
   overflow: hidden;
   transition: opacity 140ms ease, transform 140ms ease;
 }

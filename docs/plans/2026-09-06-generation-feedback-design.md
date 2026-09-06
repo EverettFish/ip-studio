@@ -13,6 +13,8 @@ Resolve four user-visible failures without adding a backend or changing the brow
 
 ## Safety and verification
 
+The official Watcha review badge stays directly above the API card, but is rendered as a compact centered pill so it remains discoverable without competing with the primary controls.
+
 - API keys remain in session storage and are sent only to the configured provider.
 - No estimated cost is invented for providers that do not expose balance or cost.
 - Tests cover Unix-second payment expiry, usage parsing, queue stop state, model selection wiring, and sidebar balance placement.
