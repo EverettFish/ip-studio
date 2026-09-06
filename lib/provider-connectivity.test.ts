@@ -21,6 +21,14 @@ describe("production connectivity regression", () => {
     expect(readFileSync("scripts/build-standalone.mjs", "utf8")).toContain("security.csp");
   });
 
+  it("publishes the Watcha review badge above the API selector", () => {
+    const shell = readFileSync("components/StudioShell.tsx", "utf8");
+    expect(shell.indexOf("watcha-review-badge")).toBeLessThan(shell.indexOf("api-mini"));
+    expect(shell).toContain("https://watcha.cn/products/ip-studio?utm_source=product-badge&utm_content=invite");
+    expect(shell).toContain("https://tos.watcha.cn/public/images/invite-0-white.png");
+    expect(security.csp).toContain("img-src 'self' data: blob: https://tos.watcha.cn");
+  });
+
   it("saves image-only credentials without requesting a text or model-list endpoint", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const saved = await validateAiConnection(imageOnly());

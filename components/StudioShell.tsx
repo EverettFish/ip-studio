@@ -549,6 +549,20 @@ export function StudioShell() {
           })}
         </nav>
 
+        <a
+          className="watcha-review-badge"
+          href="https://watcha.cn/products/ip-studio?utm_source=product-badge&utm_content=invite"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="在观猹查看并点评 IP Studio"
+        >
+          <img
+            src="https://tos.watcha.cn/public/images/invite-0-white.png"
+            alt="IP Studio 观猹徽章"
+            width={360}
+          />
+        </a>
+
         <button className={`api-mini ${connected ? "connected" : ""}`} onClick={() => setApiOpen(true)}>
           {connected ? <ShieldCheck size={17} /> : <KeyRound size={17} />}
           <span><small>{connection?.label || "模型服务"}</small><strong>{connected ? "已配置 · 可测试" : "选择 API"}</strong></span>
