@@ -152,7 +152,7 @@ img { max-width: 100%; display: block; }
 .workflow-nav button svg:last-child { opacity: 0.4; }
 
 .api-mini {
-  margin-top: auto;
+  margin-top: 8px;
   border: 1.4px dashed var(--ink);
   background: #f2eee2;
   padding: 9px 10px;
@@ -170,6 +170,17 @@ img { max-width: 100%; display: block; }
 .api-mini strong { font-size: 11px; margin-top: 1px; }
 .api-mini i { width: 7px; height: 7px; border-radius: 50%; background: #9aa6a6; box-shadow: 0 0 0 3px rgba(154, 166, 166, 0.15); }
 .api-mini.connected i { background: var(--mint); box-shadow: 0 0 0 3px rgba(79, 182, 159, 0.2); }
+
+.watcha-review-badge {
+  margin-top: auto;
+  display: block;
+  border-radius: 9px;
+  overflow: hidden;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.watcha-review-badge:hover { opacity: 0.84; transform: translateY(-1px); }
+.watcha-review-badge:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.watcha-review-badge img { width: 100%; height: auto; }
 
 .main-stage { margin-left: 244px; min-height: 100vh; }
 .topbar {
