@@ -31,8 +31,8 @@ export type TokenDancePaymentSession = {
   paymentUrl: string;
   alipayUrl?: string;
   statusUrl: string;
-  expiredAt: string;
-  createdAt: string;
+  expiredAt: number | string;
+  createdAt: number | string;
 };
 
 type StoredConnection = { connection: AiConnection; expiresAt: number };
@@ -189,6 +189,11 @@ export function getPlanningApiKey(connection: AiConnection): string {
 }
 
 export type AvailableModel = { id: string; supported_protocols?: string[] };
+
+export function imageModelOptions(connection: AiConnection): string[] {
+  if (connection.provider !== "tokendance") return [connection.imageModel];
+  return Array.from(new Set([connection.imageModel, "seedream-5.0-lite", "seedream-5.0-pro"].filter(Boolean)));
+}
 
 export function assertImageModel(id: string, model?: AvailableModel, protocol?: ImageApiProtocol): void {
   const name = id.trim().toLowerCase().split("/").at(-1) || "";
@@ -417,8 +422,8 @@ export async function createTokenDancePayment(connection: AiConnection, amount: 
     payment_url: string;
     alipay_url?: string;
     status_url: string;
-    expired_at: string;
-    created_at: string;
+    expired_at: number | string;
+    created_at: number | string;
   } }>(`${TOKENDANCE_PORTAL_BASE_URL}/payment/sessions`, connection.apiKey, {
     method: "POST",
     body: JSON.stringify({ amount }),
@@ -433,6 +438,21 @@ export async function createTokenDancePayment(connection: AiConnection, amount: 
     expiredAt: body.session.expired_at,
     createdAt: body.session.created_at,
   };
+}
+
+export function paymentTimestampMs(value: number | string): number {
+  if (typeof value === "number") return value < 1_000_000_000_000 ? value * 1000 : value;
+  const trimmed = value.trim();
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+  }
+  return Date.parse(trimmed);
+}
+
+export function isPaymentExpired(session: TokenDancePaymentSession, now = Date.now()): boolean {
+  const deadline = paymentTimestampMs(session.expiredAt);
+  return Number.isFinite(deadline) && now >= deadline;
 }
 
 export async function getTokenDancePaymentStatus(connection: AiConnection, statusUrl: string): Promise<TokenDancePaymentSession["status"]> {

@@ -26,6 +26,7 @@ import {
   defaultTokenDanceConnection,
   getTokenDanceBalance,
   getTokenDancePaymentStatus,
+  isPaymentExpired,
   microYuanToYuan,
   type AiConnection,
   type AiProviderId,
@@ -180,7 +181,7 @@ export function ProviderModal({ connection, onClose, onConnect, onDisconnect, au
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       if (cancelled) return;
-      if (Date.now() >= new Date(payment.expiredAt).getTime()) {
+      if (isPaymentExpired(payment)) {
         setPaymentStatus("closed");
         return;
       }
@@ -309,6 +310,21 @@ export function ProviderModal({ connection, onClose, onConnect, onDisconnect, au
     }
   }
 
+  async function refreshPaymentStatus() {
+    if (!payment || connection?.provider !== "tokendance") return;
+    setPaymentLoading(true);
+    setError("");
+    try {
+      const status = await getTokenDancePaymentStatus(connection, payment.statusUrl);
+      setPaymentStatus(status === "pending" && isPaymentExpired(payment) ? "closed" : status);
+      if (status === "paid") await refreshBalance();
+    } catch (cause) {
+      setError(browserApiError(cause));
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
   function disconnect() {
     onDisconnect();
     setBalance(undefined);
@@ -364,9 +380,10 @@ export function ProviderModal({ connection, onClose, onConnect, onDisconnect, au
                   ) : (
                     <div className="payment-session">
                       {!mobile && qrCode && <img src={qrCode} alt={`支付宝充值 ${payment.amount} 元二维码`} />}
-                      <div><strong>{paymentStatus === "pending" ? `等待支付 ¥${payment.amount}` : "本次订单未完成"}</strong><span>{paymentStatus === "pending" ? (mobile ? "请点击按钮打开支付宝完成付款。" : "请使用支付宝扫描二维码。") : `订单状态：${paymentStatus}`}</span>
+                      <div><strong>{paymentStatus === "pending" ? `等待支付 ¥${payment.amount}` : paymentStatus === "closed" ? "二维码已过期" : paymentStatus === "refunded" ? "订单已退款" : "本次支付未完成"}</strong><span>{paymentStatus === "pending" ? (mobile ? "请点击按钮打开支付宝完成付款。" : "请使用支付宝扫描二维码。付款后会自动刷新，也可手动确认。") : `订单状态：${paymentStatus}`}</span>
                         {mobile && paymentStatus === "pending" && payment.alipayUrl && <button type="button" onClick={() => window.open(payment.alipayUrl, "_blank", "noopener,noreferrer")}>打开支付宝 <ExternalLink size={14} /></button>}
                         {mobile && paymentStatus === "pending" && !payment.alipayUrl && <small>当前订单没有支付宝跳转链接，请在电脑端扫码或重新创建。</small>}
+                        <button className="payment-reset" type="button" disabled={paymentLoading} onClick={() => void refreshPaymentStatus()}><RefreshCw className={paymentLoading ? "spin" : ""} size={13} /> {paymentLoading ? "正在查询" : "我已付款，刷新状态"}</button>
                         <button className="payment-reset" type="button" onClick={() => { setPayment(undefined); setPaymentStatus(undefined); }}>换个金额</button>
                       </div>
                     </div>
