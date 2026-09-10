@@ -56,6 +56,19 @@ export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const TOKENDANCE_OPENAI_BASE_URL = "https://tokendance.space/gateway/v1";
 export const TOKENDANCE_ARK_BASE_URL = "https://tokendance.space/gateway/ark/v3";
 export const TOKENDANCE_PORTAL_BASE_URL = "https://tokendance.space/portal/api/v1";
+export const IP_STUDIO_APP_URL = "https://ipstudio.fun/";
+export const IP_STUDIO_APP_NAME = "IP Studio";
+
+export function tokenDanceAttributionHeaders(connection: AiConnection, requestUrl: string): Record<string, string> {
+  if (connection.provider !== "tokendance") return {};
+  try {
+    const target = new URL(requestUrl);
+    if (target.origin !== "https://tokendance.space" || !target.pathname.startsWith("/gateway/")) return {};
+    return { "X-App-URL": IP_STUDIO_APP_URL };
+  } catch {
+    return {};
+  }
+}
 
 export function defaultOpenAiConnection(apiKey = ""): AiConnection {
   return {
@@ -213,7 +226,7 @@ export async function inspectImageModel(connection: AiConnection): Promise<strin
   const checked = validateConnectionFields(connection);
   const url = checked.provider === "tokendance" ? `${TOKENDANCE_OPENAI_BASE_URL}/models` : `${checked.imageBaseUrl}/models`;
   const response = await fetch(url, {
-    headers: checked.provider === "tokendance" ? {} : { Authorization: `Bearer ${checked.apiKey}` },
+    headers: checked.provider === "tokendance" ? tokenDanceAttributionHeaders(checked, url) : { Authorization: `Bearer ${checked.apiKey}` },
     signal: AbortSignal.timeout(15000),
   });
   if (response.status === 404 || response.status === 405) return "服务商没有模型列表接口，可以保存配置；请用下方单张测试确认生图能力。";
@@ -327,8 +340,8 @@ export async function beginTokenDanceAuthorization(options?: { planningModel?: s
   authorization.searchParams.set("callback_url", callback.toString());
   authorization.searchParams.set("code_challenge", challenge);
   authorization.searchParams.set("code_challenge_method", "S256");
-  authorization.searchParams.set("app_url", window.location.origin);
-  authorization.searchParams.set("key_name", "IP Studio 浏览器会话");
+  authorization.searchParams.set("app_url", IP_STUDIO_APP_URL);
+  authorization.searchParams.set("key_name", IP_STUDIO_APP_NAME);
   window.location.assign(authorization.toString());
 }
 

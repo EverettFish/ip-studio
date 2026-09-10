@@ -2,15 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defaultCustomConnection,
   defaultOpenAiConnection,
+  defaultTokenDanceConnection,
   forgetAiConnection,
   microYuanToYuan,
   getTokenDancePaymentStatus,
   imageModelOptions,
   isPaymentExpired,
+  IP_STUDIO_APP_URL,
   normalizeApiBaseUrl,
   paymentTimestampMs,
   rememberAiConnection,
   restoreAiConnection,
+  tokenDanceAttributionHeaders,
   validateConnectionFields,
 } from "./ai-provider";
 
@@ -76,6 +79,15 @@ describe("AI provider connection", () => {
   it("offers only image-capable TokenDance run models without replacing a custom model", () => {
     expect(imageModelOptions({ ...defaultOpenAiConnection("key"), provider: "tokendance", imageModel: "seedream-5.0-lite" })).toEqual(["seedream-5.0-lite", "seedream-5.0-pro"]);
     expect(imageModelOptions({ ...defaultOpenAiConnection("key"), provider: "custom", imageModel: "my-image-model" })).toEqual(["my-image-model"]);
+  });
+
+  it("uses the exact stable App URL only for TokenDance model gateway requests", () => {
+    const connection = defaultTokenDanceConnection("td-test-key");
+    expect(IP_STUDIO_APP_URL).toBe("https://ipstudio.fun/");
+    expect(tokenDanceAttributionHeaders(connection, "https://tokendance.space/gateway/ark/v3/images/generations")).toEqual({ "X-App-URL": "https://ipstudio.fun/" });
+    expect(tokenDanceAttributionHeaders(connection, "https://tokendance.space/portal/api/v1/user/balance")).toEqual({});
+    expect(tokenDanceAttributionHeaders(connection, "https://tokendance.space.evil.example/gateway/v1/chat/completions")).toEqual({});
+    expect(tokenDanceAttributionHeaders(defaultOpenAiConnection("sk-test-key"), "https://tokendance.space/gateway/v1/images/edits")).toEqual({});
   });
 
   it("never sends a TokenDance key to an untrusted payment status URL", async () => {

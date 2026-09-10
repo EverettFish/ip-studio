@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import security from "./security-policy.json";
-import { assertImageModel, beginTokenDanceAuthorization, completeTokenDanceAuthorization, defaultCustomConnection, defaultTokenDanceConnection, getPlanningApiKey, inspectImageModel, normalizeApiBaseUrl, validateAiConnection, validateConnectionFields } from "./ai-provider";
-import { generateBrowserImage, generateBrowserImageResult, planBrowserJobs } from "./browser-openai";
+import { assertImageModel, beginTokenDanceAuthorization, completeTokenDanceAuthorization, defaultCustomConnection, defaultTokenDanceConnection, getPlanningApiKey, inspectImageModel, IP_STUDIO_APP_URL, normalizeApiBaseUrl, ProviderApiError, validateAiConnection, validateConnectionFields } from "./ai-provider";
+import { browserApiError, generateBrowserImage, generateBrowserImageResult, planBrowserJobs } from "./browser-openai";
 import { planLocalArticle } from "./local-planner";
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j4oQAAAAASUVORK5CYII=";
@@ -81,16 +81,40 @@ describe("production connectivity regression", () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer text-secret");
   });
 
+  it("attributes TokenDance text planning requests to the exact IP Studio App URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ choices: [{ message: { content: JSON.stringify({ jobs: [{ title: "咖啡店", prompt: "An IP reading.", size: "1024x1024", background: "opaque" }] }) } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await planBrowserJobs({ connection: defaultTokenDanceConnection("td-test-key"), workflow: "article", article: "一篇关于读书与咖啡的文章，内容足够生成一个清晰画面。", config: { count: 1 } });
+    expect(fetchMock.mock.calls[0][1].headers["X-App-URL"]).toBe(IP_STUDIO_APP_URL);
+  });
+
   it("sends the anchor as first reference and decodes the returned TokenDance image", async () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
     vi.stubGlobal("fetch", fetchMock);
     const blob = new Blob([Buffer.from(png, "base64")], { type: "image/png" });
     const result = await generateBrowserImage({ connection: defaultTokenDanceConnection("td-test-key"), anchor: { id: "primary", name: "anchor.png", blob, updatedAt: 1 }, source: new File([blob], "source.png", { type: "image/png" }), quality: "low", job: { id: "test", title: "测试", prompt: "Use image 1 as anchor", size: "1024x1024", background: "opaque" } });
     expect(fetchMock.mock.calls[0][0]).toBe("https://tokendance.space/gateway/ark/v3/images/generations");
+    expect(fetchMock.mock.calls[0][1].headers["X-App-URL"]).toBe(IP_STUDIO_APP_URL);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.image).toHaveLength(2);
     expect(body.image[0]).toBe(`data:image/png;base64,${png}`);
     expect(result.type).toBe("image/png");
+  });
+
+  it("attributes TokenDance OpenAI-compatible image edit requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const blob = new Blob([Buffer.from(png, "base64")], { type: "image/png" });
+    const connection = {
+      ...defaultTokenDanceConnection("td-test-key"),
+      imageBaseUrl: "https://tokendance.space/gateway/v1",
+      imageModel: "gpt-image-2",
+      imageProtocol: "openai-edits" as const,
+    };
+    await generateBrowserImage({ connection, anchor: { id: "primary", name: "anchor.png", blob, updatedAt: 1 }, quality: "low", job: { id: "openai-edit", title: "测试", prompt: "Keep image 1 identity", size: "1024x1024", background: "opaque" } });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://tokendance.space/gateway/v1/images/edits");
+    expect(init.headers["X-App-URL"]).toBe(IP_STUDIO_APP_URL);
   });
 
   it("returns provider-reported image token usage without inventing missing values", async () => {
@@ -115,6 +139,7 @@ describe("production connectivity regression", () => {
     expect(init.body.get("model")).toBe("custom-image");
     expect(init.body.getAll("image[]").length).toBe(1);
     expect(init.body.has("quality")).toBe(false);
+    expect(init.headers["X-App-URL"]).toBeUndefined();
   });
 
   it("completes same-tab PKCE and removes the authorization code from the URL", async () => {
@@ -124,6 +149,8 @@ describe("production connectivity regression", () => {
     vi.stubGlobal("window", { location, history: { replaceState }, sessionStorage: { getItem: (key: string) => values.get(key) || null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) } });
     await beginTokenDanceAuthorization({ planningMode: "local" });
     const auth = new URL(location.assign.mock.calls[0][0]);
+    expect(auth.searchParams.get("app_url")).toBe("https://ipstudio.fun/");
+    expect(auth.searchParams.get("key_name")).toBe("IP Studio");
     const callback = new URL(auth.searchParams.get("callback_url")!);
     callback.searchParams.set("code", "one-time-test-code"); location.href = callback.toString();
     const fetchMock = vi.fn().mockResolvedValue(json({ key: "td-issued-key" })); vi.stubGlobal("fetch", fetchMock);
@@ -134,5 +161,11 @@ describe("production connectivity regression", () => {
     const exchange = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(exchange.code_verifier.length).toBeGreaterThanOrEqual(43);
     expect(exchange.code_challenge_method).toBe("S256");
+  });
+
+  it("prioritizes TokenDance recovery actions over generic HTTP status messages", () => {
+    expect(browserApiError(new ProviderApiError("Unauthorized", 401, "reauthorize_api_key"))).toContain("重新授权");
+    expect(browserApiError(new ProviderApiError("Insufficient", 402, "top_up_balance"))).toContain("充值");
+    expect(browserApiError(new ProviderApiError("Quota", 429, "api_key_quota"))).toContain("额度上限");
   });
 });
