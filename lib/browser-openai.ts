@@ -2,7 +2,7 @@
 
 import OpenAI from "openai";
 import { buildAnchorConversionPrompt } from "./anchor-styles";
-import { assertImageModel, getPlanningApiKey, ProviderApiError, usesApiPlanning, type AiConnection } from "./ai-provider";
+import { assertImageModel, getPlanningApiKey, ProviderApiError, tokenDanceAttributionHeaders, usesApiPlanning, type AiConnection } from "./ai-provider";
 import { planLocalArticle } from "./local-planner";
 import { composeGenerationPrompt, generationPolicy, normalizeGenerationStyle } from "./generation-policy";
 import { base64PngToBlob } from "./image-result";
@@ -42,9 +42,11 @@ function finiteUsage(value: number | undefined): number | undefined {
 }
 
 function client(connection: AiConnection, image = false) {
+  const baseURL = image ? connection.imageBaseUrl : connection.baseUrl;
   return new OpenAI({
     apiKey: image ? connection.apiKey : getPlanningApiKey(connection),
-    baseURL: image ? connection.imageBaseUrl : connection.baseUrl,
+    baseURL,
+    defaultHeaders: tokenDanceAttributionHeaders(connection, baseURL),
     dangerouslyAllowBrowser: true,
     maxRetries: 0,
   });
@@ -93,11 +95,13 @@ export async function planBrowserJobs(args: {
     });
     outputText = response.output_text;
   } else {
-    const response = await fetch(`${connection.baseUrl}/chat/completions`, {
+    const requestUrl = `${connection.baseUrl}/chat/completions`;
+    const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${getPlanningApiKey(connection)}`,
         "Content-Type": "application/json",
+        ...tokenDanceAttributionHeaders(connection, requestUrl),
       },
       body: JSON.stringify({
         model: connection.planningModel,
@@ -197,8 +201,9 @@ async function generateOpenAiImageResult(connection: AiConnection, images: File[
     form.set("output_format", "png");
   }
   // Let the browser set the multipart boundary. No SDK probe or automatic paid retry.
-  const response = await fetch(`${connection.imageBaseUrl}/images/edits`, {
-    method: "POST", headers: { Authorization: `Bearer ${connection.apiKey}` }, body: form,
+  const requestUrl = `${connection.imageBaseUrl}/images/edits`;
+  const response = await fetch(requestUrl, {
+    method: "POST", headers: { Authorization: `Bearer ${connection.apiKey}`, ...tokenDanceAttributionHeaders(connection, requestUrl) }, body: form,
   });
   if (!response.ok) throw await providerResponseError(response);
   const result = await response.json() as ImageResponse;
@@ -249,11 +254,13 @@ async function generateArkImage(connection: AiConnection, files: File[], prompt:
 
 async function generateArkImageResult(connection: AiConnection, files: File[], prompt: string, size: string): Promise<GenerationResult> {
   const imageInputs = await Promise.all(files.map(fileToDataUrl));
-  const response = await fetch(`${connection.imageBaseUrl}/images/generations`, {
+  const requestUrl = `${connection.imageBaseUrl}/images/generations`;
+  const response = await fetch(requestUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${connection.apiKey}`,
       "Content-Type": "application/json",
+      ...tokenDanceAttributionHeaders(connection, requestUrl),
     },
     body: JSON.stringify({
       model: connection.imageModel,
@@ -280,12 +287,12 @@ async function generateArkImageResult(connection: AiConnection, files: File[], p
 export function browserApiError(error: unknown): string {
   if (!(error instanceof Error)) return "生成失败，请稍后重试。";
   const message = error.message.toLowerCase();
-  if (error instanceof ProviderApiError && error.status === 401) return "API Key 无效或过期，请在 API 配置中更换对应服务的 Key。";
   if (error.name === "TimeoutError" || message.includes("timed out")) return "接口请求超时。请检查服务地址与网络；生成请求请先在服务商后台确认是否已扣费，不要连续重试。";
   if (error instanceof ProviderApiError) {
     if (error.recoveryAction === "top_up_balance") return "TokenDance 余额不足，请打开 API 配置完成充值后重试。";
     if (error.recoveryAction === "reauthorize_api_key") return "TokenDance 授权已失效，请打开 API 配置重新授权。";
     if (error.recoveryAction === "api_key_quota") return "这个 TokenDance Key 的额度上限已用完，请调整 Key 配额或重新授权。";
+    if (error.status === 401) return "API Key 无效或过期，请在 API 配置中更换对应服务的 Key。";
   }
   if (message.includes("401") || message.includes("incorrect api key")) return "API Key 无效或已经失效，请重新连接。";
   if (message.includes("429") || message.includes("rate_limit")) return "当前生成速度超过账户限制，请稍后重试这一张。";
