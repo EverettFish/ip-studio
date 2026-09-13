@@ -126,6 +126,7 @@ export function ProviderModal({ connection, onClose, onConnect, onDisconnect, au
 
   const settingsFields = (
     <>
+      <div className="image-model-recommendation"><Check size={16} /><div><strong>如供应商提供，优先推荐 Image 2 / gpt-image-2</strong><span>人物一致性、透明 PNG 和信息图中文字通常更稳定。其他支持参考图的生图模型也能使用，但实际效果可能不同；聊天模型不能代替生图模型。</span></div></div>
       <div className="model-settings compact">
         {provider === "custom" && <label className="wide"><span>① 生图接口地址（必填）</span><input value={imageBaseUrl || baseUrl} onChange={(event) => setImageBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /><small>复制服务商的 Base URL。也支持粘贴以 /images/edits 或 /images/generations 结尾的完整地址。</small></label>}
         <label className="wide"><span>② 生图模型 ID（必填，不是聊天模型）</span>{provider === "tokendance" ? <select value={imageModel} onChange={(event) => setImageModel(event.target.value)}><option value="seedream-5.0-lite">Seedream 5.0 Lite · 图生图</option><option value="seedream-5.0-pro">Seedream 5.0 Pro · 图生图</option></select> : <input value={imageModel} onChange={(event) => setImageModel(event.target.value)} placeholder="复制服务商的生图模型 ID，例如 gpt-image-2" />}<small>必须支持输入参考图并返回图片。DeepSeek Chat、Claude、普通 GPT 等文字模型不能用来生图；“能看图”也不等于“能生成图”。</small></label>

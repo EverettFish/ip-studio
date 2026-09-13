@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANCHOR_STYLE_PRESETS, buildAnchorConversionPrompt, getAnchorStylePreset } from "./anchor-styles";
+import { ANCHOR_STYLE_PRESETS, buildAnchorConversionPrompt, buildStarterAnchorPrompt, getAnchorStylePreset, STARTER_ANCHOR_DEMOS } from "./anchor-styles";
 
 describe("anchor style presets", () => {
   it("offers original plus three illustrated conversion styles", () => {
@@ -16,5 +16,19 @@ describe("anchor style presets", () => {
       expect(prompt).toContain(getAnchorStylePreset(style).prompt);
       expect(prompt).toContain("No text, logo, watermark, scenery, extra character");
     }
+  });
+
+  it("builds an original starter anchor without pretending an identity image exists", () => {
+    expect(STARTER_ANCHOR_DEMOS).toHaveLength(3);
+    const prompt = buildStarterAnchorPrompt(STARTER_ANCHOR_DEMOS[0].brief, "mengli");
+    expect(prompt).toContain("There is no identity reference image yet");
+    expect(prompt).toContain("Pure white 1:1 square canvas");
+    expect(prompt).toContain("occupying about 25–35%");
+    expect(prompt).toContain(getAnchorStylePreset("mengli").prompt);
+    expect(prompt).not.toContain("Image 1 is the only identity source");
+  });
+
+  it("requires a meaningful starter description", () => {
+    expect(() => buildStarterAnchorPrompt("蓝发", "flat")).toThrow(/至少写一句/);
   });
 });
