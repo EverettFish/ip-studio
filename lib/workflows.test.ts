@@ -94,12 +94,51 @@ describe("workflow defaults", () => {
     expect(parseList("甲、乙\n丙，丁", [])).toEqual(["甲", "乙", "丙", "丁"]);
   });
 
-  it("uses compact micro-scenes for only part of an expression pack", () => {
+  it("defaults expression packs to one clean white background policy", () => {
     const config = defaultConfig(workflowMap.expressions);
+    const jobs = buildStaticJobs("expressions", config);
+    expect(jobs).toHaveLength(12);
+    expect(jobs.every((item) => item.prompt.includes("clean pure-white cutout in every image"))).toBe(true);
+    expect(jobs.every((item) => item.prompt.includes("Ignore and remove Image 1's original background completely"))).toBe(true);
+  });
+
+  it("offers transparent sticker sheets and keeps the exact title visible", () => {
+    const config = { ...defaultConfig(workflowMap.stickers), background: "transparent" };
+    const first = buildStaticJobs("stickers", config)[0];
+    expect(first.background).toBe("transparent");
+    expect(first.prompt).toContain("true transparent 3:4 PNG canvas");
+    expect(first.prompt).toContain("Render “Life” exactly once");
+    expect(first.prompt).toContain("must be alpha 0");
+  });
+
+  it("applies shared batch requirements to every generated item", () => {
+    const config = { ...defaultConfig(workflowMap.avatars), sharedRequirements: "所有头像都使用同一款蓝色杯子" };
+    const jobs = buildStaticJobs("avatars", config);
+    expect(jobs).toHaveLength(4);
+    expect(jobs.every((item) => item.prompt.includes("所有头像都使用同一款蓝色杯子"))).toBe(true);
+    jobs.forEach((item, index) => expect(item.prompt).toContain(`CURRENT BATCH ITEM: ${index + 1}.`));
+  });
+
+  it("locks seated photo fusion to the real seat surface", () => {
+    const config = { ...defaultConfig(workflowMap.photo), interaction: "坐在真实物体上", placement: "背对镜头坐在椅面" };
+    const first = buildStaticJobs("photo", config, 1)[0];
+    expect(first.prompt).toContain("Place the character's pelvis and thighs on the seat surface");
+    expect(first.prompt).toContain("backrest behind the torso");
+    expect(first.prompt).toContain("背对镜头坐在椅面");
+  });
+
+  it("keeps compact micro-scenes available as an explicit expression option", () => {
+    const config = { ...defaultConfig(workflowMap.expressions), backgroundStyle: "mixed" };
     const jobs = buildStaticJobs("expressions", config);
     const scenes = jobs.filter((item) => item.prompt.includes("compact irregular micro-scene"));
     expect(jobs).toHaveLength(12);
     expect(scenes.length).toBeGreaterThanOrEqual(4);
     expect(scenes.length).toBeLessThanOrEqual(6);
+  });
+
+  it("can keep the same grass treatment across a complete expression pack", () => {
+    const config = { ...defaultConfig(workflowMap.expressions), backgroundStyle: "grass" };
+    const jobs = buildStaticJobs("expressions", config);
+    expect(jobs.every((item) => item.prompt.includes("same compact irregular grass patch in every image"))).toBe(true);
   });
 });

@@ -1169,3 +1169,107 @@ body::before,
   .payment-confirm div { justify-content: flex-end; }
   .payment-session { align-items: stretch; flex-direction: column; }
 }
+
+/* First-anchor onboarding and generation safeguards */
+.anchor-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin: 18px 0 14px;
+  padding: 4px;
+  background: #f3f3f1;
+  border-radius: 10px;
+}
+.anchor-mode-tabs button {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: #696965;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+.anchor-mode-tabs button.is-active { color: #111111; background: #ffffff; border-color: #d6d6d1; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+.starter-anchor-builder { display: grid; gap: 13px; }
+.starter-demo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.starter-demo-grid button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  text-align: left;
+  color: #111111;
+  background: #ffffff;
+  border: 1px solid #deded9;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.starter-demo-grid button:hover:not(:disabled) { border-color: #8d8d88; }
+.starter-demo-grid img { width: 48px; height: 48px; object-fit: cover; border-radius: 7px; }
+.starter-demo-grid strong, .starter-demo-grid small { display: block; }
+.starter-demo-grid strong { font-size: 9px; }
+.starter-demo-grid small { margin-top: 3px; color: #777773; font-size: 7px; line-height: 1.35; }
+.starter-brief > span { display: block; margin-bottom: 6px; font-size: 10px; font-weight: 700; }
+.starter-brief textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 11px 12px;
+  resize: vertical;
+  color: #111111;
+  background: #ffffff;
+  border: 1px solid #cececa;
+  border-radius: 9px;
+  outline: none;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.65;
+}
+.starter-brief textarea:focus { border-color: #111111; box-shadow: 0 0 0 2px rgba(0,0,0,.07); }
+.starter-brief > small { display: block; margin-top: 5px; color: #797975; font-size: 8px; }
+.starter-candidate { display: grid; grid-template-columns: 140px 1fr; gap: 14px; align-items: center; padding: 10px; background: #f7f7f5; border-radius: 10px; }
+.starter-candidate > img { width: 140px; aspect-ratio: 1; object-fit: contain; background: #ffffff; border-radius: 8px; }
+.starter-candidate strong, .starter-candidate small { display: block; }
+.starter-candidate strong { font-size: 11px; }
+.starter-candidate small { margin-top: 5px; color: #6f6f6b; font-size: 8px; line-height: 1.5; }
+.starter-candidate button { margin-top: 10px; padding: 7px 9px; color: #111111; background: #ffffff; border: 1px solid #cfcfca; border-radius: 7px; cursor: pointer; font-size: 8px; }
+.starter-model-note,
+.image-model-recommendation,
+.foreground-generation-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  color: #111111;
+  background: #f4f4f2;
+  border-radius: 9px;
+}
+.starter-model-note svg,
+.image-model-recommendation svg,
+.foreground-generation-note svg { flex: none; margin-top: 1px; }
+.starter-model-note strong, .starter-model-note small,
+.image-model-recommendation strong, .image-model-recommendation span,
+.foreground-generation-note strong, .foreground-generation-note small { display: block; }
+.starter-model-note strong, .image-model-recommendation strong, .foreground-generation-note strong { font-size: 9px; }
+.starter-model-note small, .image-model-recommendation span, .foreground-generation-note small { margin-top: 3px; color: #6f6f6b; font-size: 8px; line-height: 1.5; }
+.image-model-recommendation { margin: 12px 0 2px; background: #f7f7f5; }
+.model-fit-tip { margin-top: 4px !important; color: #9a4f34 !important; }
+.foreground-generation-note { margin: 12px 0 0; }
+.foreground-generation-note.is-active { background: #fff2cf; box-shadow: inset 3px 0 0 #111111; }
+
+@media (max-width: 640px) {
+  .anchor-mode-tabs { grid-template-columns: 1fr; }
+  .starter-demo-grid { grid-template-columns: 1fr; }
+  .starter-demo-grid button { grid-template-columns: 42px 1fr; }
+  .starter-demo-grid img { width: 42px; height: 42px; }
+  .starter-candidate { grid-template-columns: 96px 1fr; }
+  .starter-candidate > img { width: 96px; }
+}

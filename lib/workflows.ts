@@ -6,6 +6,7 @@ import type {
   WorkflowId,
 } from "@/lib/types";
 import {
+  appendSharedRequirements,
   composeGenerationPrompt,
   normalizeGenerationStyle,
   type GenerationStyleMode,
@@ -31,6 +32,15 @@ const CORE_STYLE_FIELD = {
     { label: "萌粒画风", value: "mengli" },
   ],
   help: "默认沿用已确认的核心锚点画风；也可临时切换为萌粒风，不会改动锚点本身。",
+};
+
+const SHARED_REQUIREMENTS_FIELD = {
+  key: "sharedRequirements",
+  label: "整套统一要求（可选）",
+  kind: "textarea" as const,
+  defaultValue: "",
+  placeholder: "例如：所有图片都不要草地；只有第 1 张脚下有草地，其余保持纯白",
+  help: "会写进这一轮的每张任务；可用“第 1 张 / 其余图片”分别指定。请描述画面要求，不要粘贴 API Key。",
 };
 
 export function stickerThemes(config: WorkflowConfig): string[] {
@@ -80,6 +90,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "",
         placeholder: "可留空，让 Studio 自动判断",
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -120,6 +131,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "薄荷绿 + 番茄红",
         options: ["薄荷绿 + 番茄红", "湖蓝 + 奶油黄", "珊瑚橙 + 青绿", "沿用角色配色"].map((value) => ({ label: value, value })),
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -150,6 +162,15 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "自动寻找可信互动点",
         options: ["自动寻找可信互动点", "坐在真实物体上", "从物体后探头", "指向现场重点", "与食物或展品互动"].map((value) => ({ label: value, value })),
       },
+      {
+        key: "placement",
+        label: "朝向与接触细节（可选）",
+        kind: "textarea",
+        defaultValue: "",
+        placeholder: "例如：背对镜头坐在椅面，椅背在人物背后，双腿朝向桌子",
+        help: "写清正面/背面、身体接触哪个表面，以及哪个物体应挡在角色前面。",
+      },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -178,6 +199,18 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         placeholder: "一行一句；留空则除页眉标题外不加文字",
         help: "只使用你写下的短句，不自动发明文案。",
       },
+      {
+        key: "background",
+        label: "贴纸页底色",
+        kind: "select",
+        defaultValue: "opaque",
+        options: [
+          { label: "柔和底色（完整贴纸页）", value: "opaque" },
+          { label: "透明底（贴纸外区域透明）", value: "transparent" },
+        ],
+        help: "透明底需要生图模型支持透明 PNG；不支持时可能仍返回白底。",
+      },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -204,6 +237,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "Mac 桌面",
         options: ["Mac 桌面", "Windows 桌面", "Notion / 网盘"].map((value) => ({ label: value, value })),
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -230,6 +264,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "大面积横线区",
         options: ["大面积横线区", "纯留白", "方格区", "上图下文"].map((value) => ({ label: value, value })),
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -255,6 +290,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "",
         placeholder: "可留空，不自动发明文字",
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -280,6 +316,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "肩部以上",
         options: ["肩部以上", "大头近景", "半身小动作"].map((value) => ({ label: value, value })),
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -320,6 +357,19 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "无文字，靠动作表达",
         options: ["无文字，靠动作表达", "少量聊天短句", "每张都有短句"].map((value) => ({ label: value, value })),
       },
+      {
+        key: "backgroundStyle",
+        label: "整套背景",
+        kind: "select",
+        defaultValue: "white",
+        options: [
+          { label: "整套纯白底（最统一）", value: "white" },
+          { label: "整套同款草地碎片", value: "grass" },
+          { label: "纯白 + 4–6 张小场景", value: "mixed" },
+        ],
+        help: "锚点原图的黑底、照片底不会带入表情包；选择后整套统一执行。",
+      },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
   {
@@ -357,6 +407,7 @@ export const workflowDefinitions: WorkflowDefinition[] = [
         defaultValue: "",
         placeholder: "仅在上项选择替换时填写",
       },
+      SHARED_REQUIREMENTS_FIELD,
     ],
   },
 ];
@@ -387,11 +438,12 @@ function job(
   background: GenerationJob["background"] = "opaque",
   sourceIndex?: number,
   style: GenerationStyleMode = "mengli",
+  sharedRequirements?: ConfigValue,
 ): GenerationJob {
   return {
     id: `${workflow}-${Date.now()}-${index}`,
     title,
-    prompt: composeGenerationPrompt(prompt, style),
+    prompt: composeGenerationPrompt(appendSharedRequirements(`CURRENT BATCH ITEM: ${index + 1}. TITLE: ${title}.\n\n${prompt}`, sharedRequirements), style),
     size,
     background,
     sourceIndex,
@@ -437,16 +489,20 @@ export function buildStaticJobs(
   const style = normalizeGenerationStyle(config.style, "anchor");
 
   if (workflowId === "photo") {
+    const sittingContract = String(config.interaction).includes("坐")
+      ? "SEATED GEOMETRY: First identify the actual horizontal seat surface and the chair's front/back orientation. Place the character's pelvis and thighs on the seat surface, torso on the usable front side, legs extending from the seat's front edge, and the real backrest behind the torso. Never place the character on the backrest, behind the chair, through the chair, or hovering above the seat."
+      : "";
     return Array.from({ length: sourceCount }, (_, index) =>
       job(
         workflowId,
         index,
         `实拍融合 ${index + 1}`,
-        `${identityHeader}\n\nCreate one final fused photograph. Image 2 is the real photograph and the actual edit target. Preserve its source crop, dimensions, orientation, camera viewpoint, faces, products, signs, text, artwork, architecture, and every unrelated region.\n\nUSER INTENT: ${config.intent}\nINTERACTION CONTRACT: ${config.interaction}. Choose one specific visible scene object, state the character action, front/behind relation, exact contact point, and local shadow/reflection/light cue, then generate that interaction. Include at least two convincing physical integration cues: foreground occlusion, feet/body surface contact, contact shadow, reflection, perspective match, or local light/color-temperature match. Keep one IP appearance with visible height around 22–26% of photo height, within 18–30% unless perspective requires otherwise.\n\nApply the mandatory selected output style only to the inserted IP; keep the real scene photographic. Make a localized edit inside the interaction zone only. Reject a transparent cutout look, white fringe, sticker halo, floating pose, generic waving, global repainting, invented signage, or changes outside the interaction zone.`,
+        `${identityHeader}\n\nCreate one final fused photograph. Image 2 is the real photograph and the actual edit target. Preserve its source crop, dimensions, orientation, camera viewpoint, faces, products, signs, text, artwork, architecture, and every unrelated region.\n\nUSER INTENT: ${config.intent}\nINTERACTION CONTRACT: ${config.interaction}. ${config.placement ? `USER PLACEMENT DETAIL: ${config.placement}.` : ""} Choose one specific visible scene object, state the character action, front/behind relation, exact contact point, and local shadow/reflection/light cue, then generate that interaction. ${sittingContract} Include at least two convincing physical integration cues: foreground occlusion, feet/body surface contact, contact shadow, reflection, perspective match, or local light/color-temperature match. Keep one IP appearance with visible height around 22–26% of photo height, within 18–30% unless perspective requires otherwise.\n\nApply the mandatory selected output style only to the inserted IP; keep the real scene photographic. Make a localized edit inside the interaction zone only. Reject a transparent cutout look, white fringe, sticker halo, floating pose, generic waving, sitting on the wrong side or non-seat surface, global repainting, invented signage, or changes outside the interaction zone.`,
         "auto",
         "auto",
         index,
         style,
+        config.sharedRequirements,
       ),
     );
   }
@@ -455,15 +511,20 @@ export function buildStaticJobs(
     const bodyText = parseList(config.copy, []);
     return stickerThemes(config).map((theme, index) => {
       const exactBodyText = bodyText.length ? bodyText.join(" | ") : "NONE";
+      const transparent = config.background === "transparent";
+      const pageStructure = transparent
+        ? "- Use a true transparent 3:4 PNG canvas with no sheet, card, paper, color-zone, or full-page background.\n- Reserve the top 12–16% for one free-floating illustrated header assembly: exact title, a short edge-to-edge-equivalent decorative ground motif, and one tiny accepted-IP scene. Do not place a filled rectangle or panel behind it.\n- Arrange the 18 pieces in the lower 84–88%. Every pixel outside the title art, header mini-scene, decorations, and individual opaque kiss-cut borders must be alpha 0."
+        : "- Use two harmonious flat light-pastel zones derived from the accepted anchor palette.\n- Reserve only the top 12–16% for one full-width illustrated header block. Run one continuous lawn, meadow, or theme-equivalent ground edge to edge. Integrate one tiny accepted-IP scene directly into the header. The header is not a sticker: no white halo, cut border, floating contour, packaging hole, or separate panel around its title, character, or art.\n- Use the lower 84–88% as one uninterrupted, harmonizing, texture-free sticker field.";
       return job(
         workflowId,
         index,
         `${theme} · 贴纸页`,
-        `${identityHeader}\n\nCreate one exact 3:4 portrait kiss-cut sticker sheet.\n\nTHEME AND HEADER TITLE EXACTLY:\n${theme}\n\nPAGE STRUCTURE:\n- Use two harmonious flat light-pastel zones derived from the accepted anchor palette.\n- Reserve only the top 12–16% for one full-width illustrated header block. Run one continuous lawn, meadow, or theme-equivalent ground edge to edge. Integrate one tiny accepted-IP scene directly into the header. The header is not a sticker: no white halo, cut border, floating contour, packaging hole, or separate panel around its title, character, or art.\n- Use the lower 84–88% as one uninterrupted, harmonizing, texture-free sticker field.\n\nBODY MANIFEST — EXACTLY 18 INDEPENDENT PIECES:\n1–3: three wide IP-led scene stickers; 4–8: five full-body or half-body IP actions; 9–12: four complete-hair or complete-fur heads, faces, or expressive busts; 13–18: six very small theme-specific filler stickerlets. Every large or medium piece must contain the IP. Standalone props are micro scale only.\n\nLAYOUT:\nCombined cut-border footprint 75–82%; two tidy visual rails with roughly equal side margins; calm staggered diagonal or S-curve rhythm; compact even breathing gaps; upper, middle, side, and lower areas occupied. Every body piece has its own continuous irregular white kiss-cut border, fully visible and separate. No touching, overlap, crop, straight rows, uniform columns, rigid grid, bottom prop strip, repeated oval blobs, large void, or glossy mockup.\n\nApply the mandatory selected output style consistently across the header and every sticker.\n\nBODY TEXT EXACTLY:\n${exactBodyText}\n\nDo not invent any other text. No logo, watermark, extra character, paper grain, rectangular UI card, or identity drift.`,
+        `${identityHeader}\n\nCreate one exact 3:4 portrait kiss-cut sticker sheet.\n\nTHEME AND HEADER TITLE EXACTLY:\n${theme}\n\nPAGE STRUCTURE:\n${pageStructure}\n\nBODY MANIFEST — EXACTLY 18 INDEPENDENT PIECES:\n1–3: three wide IP-led scene stickers; 4–8: five full-body or half-body IP actions; 9–12: four complete-hair or complete-fur heads, faces, or expressive busts; 13–18: six very small theme-specific filler stickerlets. Every large or medium piece must contain the IP. Standalone props are micro scale only.\n\nLAYOUT:\nCombined cut-border footprint 75–82%; two tidy visual rails with roughly equal side margins; calm staggered diagonal or S-curve rhythm; compact even breathing gaps; upper, middle, side, and lower areas occupied. Every body piece has its own continuous irregular white kiss-cut border, fully visible and separate. No touching, overlap, crop, straight rows, uniform columns, rigid grid, bottom prop strip, repeated oval blobs, large void, or glossy mockup.\n\nTITLE VALIDATION: Render “${theme}” exactly once in the header, fully visible and readable; do not omit, translate, truncate, or replace it. Apply the mandatory selected output style consistently across the header and every sticker.\n\nBODY TEXT EXACTLY:\n${exactBodyText}\n\nDo not invent any other text. No logo, watermark, extra character, paper grain, rectangular UI card, or identity drift.`,
         "1024x1536",
-        "opaque",
+        transparent ? "transparent" : "opaque",
         undefined,
         style,
+        config.sharedRequirements,
       );
     });
   }
@@ -480,6 +541,7 @@ export function buildStaticJobs(
         "transparent",
         undefined,
         style,
+        config.sharedRequirements,
       ),
     );
   }
@@ -503,6 +565,7 @@ export function buildStaticJobs(
         "opaque",
         undefined,
         style,
+        config.sharedRequirements,
       ),
     );
   }
@@ -519,6 +582,7 @@ export function buildStaticJobs(
         "transparent",
         undefined,
         style,
+        config.sharedRequirements,
       ),
     );
   }
@@ -535,6 +599,7 @@ export function buildStaticJobs(
         "opaque",
         undefined,
         style,
+        config.sharedRequirements,
       ),
     );
   }
@@ -546,15 +611,21 @@ export function buildStaticJobs(
     ].slice(0, Number(config.count || 12));
     return meanings.map((meaning, index) => {
       const microScene = index % 3 === 1 || index % 4 === 2;
+      const backgroundMode = config.backgroundStyle === "grass"
+        ? "the same compact irregular grass patch in every image: identical ground height, green palette, broken organic edge, and clear white outer margin"
+        : config.backgroundStyle === "mixed"
+          ? (microScene ? "compact irregular micro-scene patch with an organic broken edge, below 45% of canvas and surrounded by clear white margin" : "clean white cutout")
+          : "clean pure-white cutout in every image, with no scenery or ground patch";
       return job(
         workflowId,
         index,
         meaning,
-        `Create one exact 1:1 personal-IP reaction image, item ${index + 1}/${meanings.length} in the “${config.series}” series. Meaning: ${meaning}. Make the face, hands, gesture, and zero to two emotion marks communicate instantly. Vary crop and silhouette from the rest of the pack. Character-and-prop group occupies 45–70% while preserving the complete identifying silhouette.\n\nBACKGROUND MODE: ${microScene ? "compact irregular micro-scene patch with an organic broken edge, below 45% of canvas and surrounded by clear white margin" : "clean white cutout"}. COPY MODE: ${config.copy}. Follow the mandatory output-style policy above across the complete image. No full-bleed scene, rectangular card, circular badge, frame, random icons, logo, watermark, extra character, or identity drift.`,
+        `Create one exact 1:1 personal-IP reaction image, item ${index + 1}/${meanings.length} in the “${config.series}” series. Meaning: ${meaning}. Make the face, hands, gesture, and zero to two emotion marks communicate instantly. Vary crop and silhouette from the rest of the pack. Character-and-prop group occupies 45–70% while preserving the complete identifying silhouette.\n\nBACKGROUND SOURCE RULE: Ignore and remove Image 1's original background completely, including black, photographic, scenic, gradient, or textured areas; the anchor background is never identity. BACKGROUND MODE: ${backgroundMode}. COPY MODE: ${config.copy}. Follow the mandatory output-style policy above across the complete image. No full-bleed scene, rectangular card, circular badge, frame, random icons, logo, watermark, extra character, or identity drift.`,
         "1024x1024",
         "opaque",
         undefined,
         style,
+        config.sharedRequirements,
       );
     });
   }
@@ -570,6 +641,7 @@ export function buildStaticJobs(
         "auto",
         index,
         style,
+        config.sharedRequirements,
       ),
     );
   }

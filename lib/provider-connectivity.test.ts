@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import security from "./security-policy.json";
-import { assertImageModel, beginTokenDanceAuthorization, completeTokenDanceAuthorization, defaultCustomConnection, defaultTokenDanceConnection, getPlanningApiKey, inspectImageModel, IP_STUDIO_APP_URL, normalizeApiBaseUrl, ProviderApiError, validateAiConnection, validateConnectionFields } from "./ai-provider";
-import { browserApiError, generateBrowserImage, generateBrowserImageResult, planBrowserJobs } from "./browser-openai";
+import { assertImageModel, beginTokenDanceAuthorization, completeTokenDanceAuthorization, defaultCustomConnection, defaultOpenAiConnection, defaultTokenDanceConnection, getPlanningApiKey, inspectImageModel, IP_STUDIO_APP_URL, normalizeApiBaseUrl, ProviderApiError, validateAiConnection, validateConnectionFields } from "./ai-provider";
+import { browserApiError, generateBrowserImage, generateBrowserImageResult, generateBrowserStarterAnchor, planBrowserJobs } from "./browser-openai";
 import { planLocalArticle } from "./local-planner";
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j4oQAAAAASUVORK5CYII=";
@@ -115,6 +115,31 @@ describe("production connectivity regression", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://tokendance.space/gateway/v1/images/edits");
     expect(init.headers["X-App-URL"]).toBe(IP_STUDIO_APP_URL);
+  });
+
+  it("creates a first anchor through TokenDance text-to-image without a fake reference image", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await generateBrowserStarterAnchor({ connection: defaultTokenDanceConnection("td-test-key"), brief: "蓝色短发，黑色上衣，黄色鞋子，手里拿着笔记本", styleId: "mengli" });
+    const [url, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(url).toBe("https://tokendance.space/gateway/ark/v3/images/generations");
+    expect(init.headers["X-App-URL"]).toBe(IP_STUDIO_APP_URL);
+    expect(body.image).toBeUndefined();
+    expect(body.prompt).toContain("There is no identity reference image yet");
+    expect(result.type).toBe("image/png");
+  });
+
+  it("creates a first anchor through the OpenAI image generations endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await generateBrowserStarterAnchor({ connection: defaultOpenAiConnection("sk-test-key"), brief: "绿色卷发，圆眼睛，白色连衣裙，戴一枚叶片吊坠", styleId: "flat", quality: "high" });
+    const [url, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(url).toBe("https://api.openai.com/v1/images/generations");
+    expect(body.model).toBe("gpt-image-2");
+    expect(body.quality).toBe("high");
+    expect(body.background).toBe("opaque");
   });
 
   it("returns provider-reported image token usage without inventing missing values", async () => {

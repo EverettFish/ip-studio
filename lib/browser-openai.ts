@@ -1,10 +1,10 @@
 "use client";
 
 import OpenAI from "openai";
-import { buildAnchorConversionPrompt } from "./anchor-styles";
+import { buildAnchorConversionPrompt, buildStarterAnchorPrompt } from "./anchor-styles";
 import { assertImageModel, getPlanningApiKey, ProviderApiError, tokenDanceAttributionHeaders, usesApiPlanning, type AiConnection } from "./ai-provider";
 import { planLocalArticle } from "./local-planner";
-import { composeGenerationPrompt, generationPolicy, normalizeGenerationStyle } from "./generation-policy";
+import { appendSharedRequirements, composeGenerationPrompt, generationPolicy, normalizeGenerationStyle } from "./generation-policy";
 import { base64PngToBlob } from "./image-result";
 import type { AnchorRecord, AnchorStyleId, GenerationJob, GenerationUsage, WorkflowConfig } from "./types";
 
@@ -121,7 +121,7 @@ export async function planBrowserJobs(args: {
   return parsePlan(outputText).map((item, index) => ({
     ...item,
     id: `${workflow}-${Date.now()}-${index}`,
-    prompt: composeGenerationPrompt(item.prompt, style),
+    prompt: composeGenerationPrompt(appendSharedRequirements(`CURRENT BATCH ITEM: ${index + 1}. TITLE: ${item.title}.\n\n${item.prompt}`, config.sharedRequirements), style),
     size: workflow === "article" ? "1024x1024" : "1024x1536",
     background: "opaque",
   }));
@@ -154,6 +154,20 @@ export async function convertBrowserAnchor(args: {
     return generateArkImage(args.connection, [source], buildAnchorConversionPrompt(args.styleId), "1024x1024");
   }
   return generateOpenAiImage(args.connection, [source], buildAnchorConversionPrompt(args.styleId), "1024x1024", args.quality ?? "medium", "opaque");
+}
+
+export async function generateBrowserStarterAnchor(args: {
+  connection: AiConnection;
+  brief: string;
+  styleId: Exclude<AnchorStyleId, "original">;
+  quality?: "low" | "medium" | "high";
+}): Promise<Blob> {
+  assertImageModel(args.connection.imageModel);
+  const prompt = buildStarterAnchorPrompt(args.brief, args.styleId);
+  if (args.connection.imageProtocol === "ark-generations") {
+    return generateArkImage(args.connection, [], prompt, "1024x1024");
+  }
+  return generateOpenAiTextImage(args.connection, prompt, args.quality ?? "medium");
 }
 
 export async function generateBrowserImage(args: {
@@ -213,6 +227,32 @@ async function generateOpenAiImageResult(connection: AiConnection, images: File[
   };
 }
 
+async function generateOpenAiTextImage(connection: AiConnection, prompt: string, quality: string): Promise<Blob> {
+  const requestUrl = `${connection.imageBaseUrl}/images/generations`;
+  const requestBody: Record<string, unknown> = {
+    model: connection.imageModel,
+    prompt,
+    size: "1024x1024",
+  };
+  if (connection.provider === "openai") {
+    requestBody.quality = quality;
+    requestBody.background = "opaque";
+    requestBody.output_format = "png";
+  }
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${connection.apiKey}`,
+      "Content-Type": "application/json",
+      ...tokenDanceAttributionHeaders(connection, requestUrl),
+    },
+    body: JSON.stringify(requestBody),
+  });
+  if (!response.ok) throw await providerResponseError(response);
+  const result = await response.json() as ImageResponse;
+  return openAiImageResultToBlob(result.data?.[0], "接口没有返回初始角色图。请确认模型支持文字生图 /images/generations，或改用上传角色图。 ");
+}
+
 async function openAiImageResultToBlob(result: { b64_json?: string | null; url?: string | null } | undefined, fallback: string): Promise<Blob> {
   if (result?.b64_json) return base64PngToBlob(result.b64_json);
   if (result?.url) {
@@ -255,6 +295,15 @@ async function generateArkImage(connection: AiConnection, files: File[], prompt:
 async function generateArkImageResult(connection: AiConnection, files: File[], prompt: string, size: string): Promise<GenerationResult> {
   const imageInputs = await Promise.all(files.map(fileToDataUrl));
   const requestUrl = `${connection.imageBaseUrl}/images/generations`;
+  const requestBody: Record<string, unknown> = {
+    model: connection.imageModel,
+    prompt,
+    size: arkSize(size),
+    output_format: "png",
+    response_format: "b64_json",
+    watermark: false,
+  };
+  if (imageInputs.length) requestBody.image = imageInputs.length === 1 ? imageInputs[0] : imageInputs;
   const response = await fetch(requestUrl, {
     method: "POST",
     headers: {
@@ -262,24 +311,16 @@ async function generateArkImageResult(connection: AiConnection, files: File[], p
       "Content-Type": "application/json",
       ...tokenDanceAttributionHeaders(connection, requestUrl),
     },
-    body: JSON.stringify({
-      model: connection.imageModel,
-      prompt,
-      image: imageInputs.length === 1 ? imageInputs[0] : imageInputs,
-      size: arkSize(size),
-      output_format: "png",
-      response_format: "b64_json",
-      watermark: false,
-    }),
+    body: JSON.stringify(requestBody),
   });
   if (!response.ok) throw await providerResponseError(response);
-  const body = await response.json() as ImageResponse;
-  const result = body.data?.[0];
-  if (result?.b64_json) return { blob: base64PngToBlob(result.b64_json), usage: imageUsage(body) };
+  const responseBody = await response.json() as ImageResponse;
+  const result = responseBody.data?.[0];
+  if (result?.b64_json) return { blob: base64PngToBlob(result.b64_json), usage: imageUsage(responseBody) };
   if (result?.url) {
     const downloaded = await fetch(result.url);
     if (!downloaded.ok) throw new Error("图片已经生成，但下载临时文件失败，请重试这一张。");
-    return { blob: await downloaded.blob(), usage: imageUsage(body) };
+    return { blob: await downloaded.blob(), usage: imageUsage(responseBody) };
   }
   throw new Error("模型没有返回可用图片，请重试这一张。");
 }
