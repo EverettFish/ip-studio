@@ -132,9 +132,9 @@ function useBlobUrl(blob?: Blob) {
   return url;
 }
 
-function BlobArtwork({ artwork }: { artwork: ArtworkRecord }) {
+function BlobArtwork({ artwork, onPreview }: { artwork: ArtworkRecord; onPreview: (src: string, title: string) => void }) {
   const url = useBlobUrl(artwork.blob);
-  return url ? <img src={url} alt={artwork.title} /> : <div className="image-skeleton" />;
+  return url ? <button type="button" className="image-preview-trigger" onClick={() => onPreview(url, artwork.title)} aria-label={`放大预览${artwork.title}`} title="点击放大预览"><img src={url} alt={artwork.title} /></button> : <div className="image-skeleton" />;
 }
 
 function SourceThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
@@ -205,6 +205,7 @@ export function StudioShell() {
   const [runImageModel, setRunImageModel] = useState("");
   const [stopPending, setStopPending] = useState(false);
   const [roundUsage, setRoundUsage] = useState<{ model: string; totalTokens: number; completed: number; usageAvailable: boolean; spentMicros?: number }>();
+  const [imagePreview, setImagePreview] = useState<{ src: string; title: string }>();
   const previewUrls = useRef(new Set<string>());
   const oauthHandled = useRef(false);
   const stopRequested = useRef(false);
@@ -299,6 +300,20 @@ export function StudioShell() {
       if (wakeLock) void wakeLock.release().catch(() => undefined);
     };
   }, [busy, anchorConverting]);
+
+  useEffect(() => {
+    if (!imagePreview) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setImagePreview(undefined);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [imagePreview]);
 
   const recentArtworks = useMemo(() => artworks.slice(0, 6), [artworks]);
 
@@ -874,12 +889,12 @@ export function StudioShell() {
               <div className="art-strip">
                 {recentArtworks.length ? recentArtworks.map((artwork) => (
                   <article className="art-card" key={artwork.id}>
-                    <div className="art-image"><BlobArtwork artwork={artwork} /></div>
+                    <div className="art-image"><BlobArtwork artwork={artwork} onPreview={(src, title) => setImagePreview({ src, title })} /></div>
                     <span>{workflowMap[artwork.workflow].title}</span><strong>{artwork.title}</strong>
                   </article>
                 )) : demoArt.map((item, index) => (
                   <article className="art-card demo" key={item.src} style={{ transform: `rotate(${index % 2 ? "1.2" : "-0.8"}deg)` }}>
-                    <div className="art-image"><img src={item.src} alt={item.title} /></div>
+                    <div className="art-image"><button type="button" className="image-preview-trigger" onClick={() => setImagePreview({ src: item.src, title: item.title })} aria-label={`放大预览${item.title}`} title="点击放大预览"><img src={item.src} alt={item.title} /></button></div>
                     <span>{item.tag}</span><strong>{item.title}</strong>
                   </article>
                 ))}
@@ -907,7 +922,7 @@ export function StudioShell() {
                   const route = workflowMap[artwork.workflow];
                   return (
                     <article className="gallery-item" key={artwork.id}>
-                      <div className="gallery-image"><BlobArtwork artwork={artwork} /></div>
+                      <div className="gallery-image"><BlobArtwork artwork={artwork} onPreview={(src, title) => setImagePreview({ src, title })} /></div>
                       <div className="gallery-meta">
                         <span className={`route-pill tone-${route.color}`}>{route.title}</span>
                         <strong>{artwork.title}</strong>
@@ -1032,9 +1047,7 @@ export function StudioShell() {
                   <div className="job-grid">
                     {jobs.map((item) => (
                       <article className={`job-card is-${item.status}`} key={item.id}>
-                        <div className="job-preview">
-                          {item.image ? <img src={item.image} alt={item.title} /> : item.status === "generating" ? <LoaderCircle className="spin" size={25} /> : item.status === "error" ? <AlertCircle size={23} /> : <FileImage size={22} />}
-                        </div>
+                        {item.image ? <button type="button" className="job-preview image-preview-trigger" onClick={() => setImagePreview({ src: item.image!, title: item.title })} aria-label={`放大预览${item.title}`} title="点击放大预览"><img src={item.image} alt={item.title} /></button> : <div className="job-preview">{item.status === "generating" ? <LoaderCircle className="spin" size={25} /> : item.status === "error" ? <AlertCircle size={23} /> : <FileImage size={22} />}</div>}
                         <div className="job-copy"><strong>{item.title}</strong><small>{item.status === "queued" ? "排队中" : item.status === "generating" ? "正在画 · 当前请求会完成" : item.status === "done" ? `${item.usage?.totalTokens ? `${item.usage.totalTokens.toLocaleString()} tokens · ` : ""}已保存` : item.status === "stopped" ? "已停止 · 未发送请求" : item.error}</small></div>
                         {item.status === "error" && <button disabled={busy} onClick={() => void retryJob(item)}>重试</button>}
                         {item.image && <a href={item.image} download={`${item.title}.png`} aria-label={`下载${item.title}`}><Download size={15} /></a>}
@@ -1080,7 +1093,7 @@ export function StudioShell() {
                   {STARTER_ANCHOR_DEMOS.map((demo, index) => <button type="button" onClick={() => chooseStarterDemo(index)} disabled={anchorConverting} key={demo.id}><img src={demo.preview} alt="" /><span><strong>{demo.title}</strong><small>{demo.description}</small></span></button>)}
                 </div>
 <label className="starter-brief"><span>描述你的第一版角色</span><textarea disabled={anchorConverting} value={starterAnchorBrief} maxLength={1200} placeholder="例如：蓝色短发、圆眼睛、黑色卫衣、黄色运动鞋，随身带一本笔记本，安静但有好奇心……" onChange={(event) => { setStarterAnchorBrief(event.target.value); if (pendingAnchorGenerated) { setPendingAnchorGenerated(false); setPendingAnchorFile(undefined); } }} /><small>{starterAnchorBrief.length}/1200 · 至少写清发型或物种、服装、配色与一个记忆点</small></label>
-                {pendingAnchorUrl && <div className="starter-candidate"><img src={pendingAnchorUrl} alt="AI 生成的待确认角色锚点" /><span><strong>这是候选，不会自动覆盖当前角色</strong><small>放大检查发型、服装、手脚与标志物，再决定是否确认。</small><button type="button" onClick={() => void generateStarterAnchorCandidate()} disabled={anchorConverting}>修改描述后重新生成</button></span></div>}
+                {pendingAnchorUrl && <div className="starter-candidate"><button type="button" className="starter-candidate-image image-preview-trigger" onClick={() => setImagePreview({ src: pendingAnchorUrl, title: "待确认的角色锚点" })} aria-label="放大预览待确认的角色锚点" title="点击放大预览"><img src={pendingAnchorUrl} alt="AI 生成的待确认角色锚点" /></button><span><strong>这是候选，不会自动覆盖当前角色</strong><small>点击图片放大检查发型、服装、手脚与标志物，再决定是否确认。</small><button type="button" onClick={() => void generateStarterAnchorCandidate()} disabled={anchorConverting}>修改描述后重新生成</button></span></div>}
                 <div className="starter-model-note"><Sparkles size={15} /><span><strong>推荐 Image 2 / gpt-image-2</strong><small>其他生图模型也可尝试，但角色细节、中文字形和透明度可能不同；模型必须支持文字生图。</small></span></div>
               </section>
             )}
@@ -1095,6 +1108,15 @@ export function StudioShell() {
             {notice && <div className="notice anchor-notice"><Sparkles size={15} /><span>{notice}</span></div>}
             {anchorCreationMode === "create" ? <button className="modal-primary" onClick={() => pendingAnchorGenerated ? void confirmAnchorStyle() : void generateStarterAnchorCandidate()} disabled={anchorConverting || (!pendingAnchorGenerated && starterAnchorBrief.trim().length < 8)}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 正在生成角色候选，请保持前台</> : pendingAnchorGenerated ? "确认这张为核心锚点" : connected ? "生成角色锚点候选（消耗 1 张）" : "连接创作 API 后生成"}</button> : <button className="modal-primary" onClick={() => void confirmAnchorStyle()} disabled={!pendingAnchorFile || anchorConverting}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 图片模型正在转换并核对身份</> : !pendingAnchorFile ? "先上传一张身份原图" : pendingAnchorStyle === "original" ? "确认原图为核心锚点" : connected ? `转换为${getAnchorStylePreset(pendingAnchorStyle).label}并确认` : "连接创作 API 后转换"}</button>}
           </div>
+        </div>
+      )}
+      {imagePreview && (
+        <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`${imagePreview.title}大图预览`} onMouseDown={(event) => { if (event.target === event.currentTarget) setImagePreview(undefined); }}>
+          <button type="button" className="image-lightbox-close" onClick={() => setImagePreview(undefined)} aria-label="关闭大图预览" autoFocus><X size={24} /></button>
+          <figure>
+            <div className="image-lightbox-stage"><img src={imagePreview.src} alt={imagePreview.title} /></div>
+            <figcaption><strong>{imagePreview.title}</strong><span>点击空白处或按 Esc 关闭</span></figcaption>
+          </figure>
         </div>
       )}
     </div>
