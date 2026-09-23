@@ -186,6 +186,7 @@ export function StudioShell() {
   const [anchorOpen, setAnchorOpen] = useState(false);
   const [anchorCreationMode, setAnchorCreationMode] = useState<"upload" | "create">("upload");
   const [starterAnchorBrief, setStarterAnchorBrief] = useState("");
+  const [starterReferenceFile, setStarterReferenceFile] = useState<File>();
   const [pendingAnchorFile, setPendingAnchorFile] = useState<File>();
   const [pendingAnchorCandidate, setPendingAnchorCandidate] = useState<File>();
   const [pendingAnchorStyle, setPendingAnchorStyle] = useState<AnchorStyleId>("original");
@@ -213,6 +214,7 @@ export function StudioShell() {
   const oauthHandled = useRef(false);
   const stopRequested = useRef(false);
   const anchorUrl = useBlobUrl(anchor?.blob);
+  const starterReferenceUrl = useBlobUrl(starterReferenceFile);
   const pendingAnchorUrl = useBlobUrl(pendingAnchorFile);
   const pendingAnchorCandidateUrl = useBlobUrl(pendingAnchorCandidate);
   const connected = Boolean(connection?.apiKey);
@@ -381,6 +383,7 @@ export function StudioShell() {
   function openStarterAnchor() {
     setNotice("");
     setAnchorCreationMode("create");
+    setStarterReferenceFile(undefined);
     setPendingAnchorFile(undefined);
     setPendingAnchorCandidate(undefined);
     setPendingAnchorStyle("mengli");
@@ -410,6 +413,21 @@ export function StudioShell() {
     setPendingAnchorCandidate(undefined);
     setPendingAnchorStyle("original");
     setNotice("图片已载入，请确认 IP 核心画风后再保存锚点。");
+  }
+
+  function handleStarterReference(file?: File) {
+    if (!file) return;
+    if (!supportedImageTypes.has(file.type)) {
+      setNotice("参考图仅支持 PNG、JPG 和 WEBP。 ");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setNotice("参考图请控制在 20MB 以内。");
+      return;
+    }
+    setStarterReferenceFile(file);
+    setPendingAnchorCandidate(undefined);
+    setNotice("参考图已载入。生成时会参考人物特征、服装与配色，文字描述可覆盖你想修改的部分。 ");
   }
 
   function chooseAnchorCreationMode(mode: "upload" | "create") {
@@ -454,14 +472,14 @@ export function StudioShell() {
       setResumeAnchorAfterApi(true);
       setAnchorOpen(false);
       setApiOpen(true);
-      setNotice("先连接一个支持文字生图的图片模型，再回来生成第一张角色锚点。 ");
+      setNotice(starterReferenceFile ? "先连接一个支持参考图编辑的生图模型，再回来生成第一张角色锚点。 " : "先连接一个支持文字生图的图片模型，再回来生成第一张角色锚点。 ");
       return;
     }
     const styleId = pendingAnchorStyle === "original" ? "mengli" : pendingAnchorStyle;
     setAnchorConverting(true);
     setNotice("正在生成第一张角色锚点候选，请保持页面在前台…");
     try {
-      const blob = await generateBrowserStarterAnchor({ connection, brief: starterAnchorBrief, styleId, quality: "medium" });
+      const blob = await generateBrowserStarterAnchor({ connection, brief: starterAnchorBrief, styleId, quality: "medium", reference: starterReferenceFile });
       const file = new File([blob], `ip-anchor-${styleId}.png`, { type: blob.type || "image/png" });
       setPendingAnchorCandidate(file);
       setPendingAnchorStyle(styleId);
@@ -520,6 +538,7 @@ export function StudioShell() {
       await saveAnchor(record);
       setAnchor(record);
       setPendingAnchorFile(undefined);
+      setStarterReferenceFile(undefined);
       setPendingAnchorCandidate(undefined);
       setAnchorCreationMode("upload");
       setNotice(`${getAnchorStylePreset(pendingAnchorStyle).label}已确认为 IP 核心画风，之后默认沿用。`);
@@ -1129,8 +1148,20 @@ export function StudioShell() {
                 <div className="starter-demo-grid">
                   {STARTER_ANCHOR_DEMOS.map((demo, index) => <button type="button" onClick={() => chooseStarterDemo(index)} disabled={anchorConverting} key={demo.id}><img src={demo.preview} alt="" /><span><strong>{demo.title}</strong><small>{demo.description}</small></span></button>)}
                 </div>
+                <section className="starter-reference-section">
+                  <div className="anchor-style-heading"><span>添加一张参考图（可选）</span><small>参考身份、服装和配色；不会直接保存为锚点</small></div>
+                  {starterReferenceUrl && starterReferenceFile ? (
+                    <div className="starter-reference-card">
+                      <button type="button" className="starter-reference-preview image-preview-trigger" onClick={() => setImagePreview({ src: starterReferenceUrl, title: "第一版角色参考图" })} aria-label="放大预览第一版角色参考图"><img src={starterReferenceUrl} alt="第一版角色参考图" /></button>
+                      <span><strong>{starterReferenceFile.name}</strong><small>文字描述会覆盖与参考图冲突的细节；背景、文字和无关人物不会继承。</small></span>
+                      <div className="starter-reference-actions"><label><UploadCloud size={14} /> 更换<input type="file" accept="image/png,image/jpeg,image/webp" disabled={anchorConverting} onChange={(event) => handleStarterReference(event.target.files?.[0])} /></label><button type="button" disabled={anchorConverting} onClick={() => { setStarterReferenceFile(undefined); setPendingAnchorCandidate(undefined); setNotice("已移除参考图，将只根据文字描述生成。 "); }}><Trash2 size={14} /> 移除</button></div>
+                    </div>
+                  ) : (
+                    <label className="starter-reference-upload"><UploadCloud size={20} /><span><strong>上传人物、穿搭或画风参考</strong><small>PNG / JPG / WEBP，最大 20MB</small></span><input type="file" accept="image/png,image/jpeg,image/webp" disabled={anchorConverting} onChange={(event) => handleStarterReference(event.target.files?.[0])} /></label>
+                  )}
+                </section>
 <label className="starter-brief"><span>描述你的第一版角色</span><textarea disabled={anchorConverting} value={starterAnchorBrief} maxLength={1200} placeholder="例如：蓝色短发、圆眼睛、黑色卫衣、黄色运动鞋，随身带一本笔记本，安静但有好奇心……" onChange={(event) => { setStarterAnchorBrief(event.target.value); if (pendingAnchorCandidate) setPendingAnchorCandidate(undefined); }} /><small>{starterAnchorBrief.length}/1200 · 至少写清发型或物种、服装、配色与一个记忆点</small></label>
-                <div className="starter-model-note"><Sparkles size={15} /><span><strong>推荐 Image 2 / gpt-image-2</strong><small>其他生图模型也可尝试，但角色细节、中文字形和透明度可能不同；模型必须支持文字生图。</small></span></div>
+                <div className="starter-model-note"><Sparkles size={15} /><span><strong>推荐 Image 2 / gpt-image-2</strong><small>{starterReferenceFile ? "当前已添加参考图：模型必须支持图生图 / 图片编辑；只有文生图能力的模型无法读取参考图。" : "其他生图模型也可尝试，但角色细节、中文字形和透明度可能不同；模型必须支持文字生图。"}</small></span></div>
               </section>
             )}
 
