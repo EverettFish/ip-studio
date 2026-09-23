@@ -9,6 +9,7 @@ import {
   Camera,
   Check,
   ChevronRight,
+  CircleHelp,
   Clock3,
   Download,
   FileImage,
@@ -34,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentType, DragEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import type {
   AnchorRecord,
@@ -86,6 +87,7 @@ import {
   type GenerationResult,
 } from "@/lib/browser-openai";
 import { ProviderModal } from "@/components/ProviderModal";
+import { FirstVisitOnboarding, ONBOARDING_STORAGE_KEY } from "@/components/FirstVisitOnboarding";
 
 const iconMap: Record<WorkflowId, ComponentType<{ size?: number; strokeWidth?: number }>> = {
   anchor: UserRound,
@@ -175,6 +177,7 @@ function CreditsMarquee() {
 export function StudioShell() {
   const [view, setView] = useState<"studio" | "gallery">("studio");
   const [mobileNav, setMobileNav] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [anchor, setAnchor] = useState<AnchorRecord>();
   const [artworks, setArtworks] = useState<ArtworkRecord[]>([]);
   const [connection, setConnection] = useState<AiConnection>();
@@ -183,8 +186,8 @@ export function StudioShell() {
   const [anchorOpen, setAnchorOpen] = useState(false);
   const [anchorCreationMode, setAnchorCreationMode] = useState<"upload" | "create">("upload");
   const [starterAnchorBrief, setStarterAnchorBrief] = useState("");
-  const [pendingAnchorGenerated, setPendingAnchorGenerated] = useState(false);
   const [pendingAnchorFile, setPendingAnchorFile] = useState<File>();
+  const [pendingAnchorCandidate, setPendingAnchorCandidate] = useState<File>();
   const [pendingAnchorStyle, setPendingAnchorStyle] = useState<AnchorStyleId>("original");
   const [anchorConverting, setAnchorConverting] = useState(false);
   const [resumeAnchorAfterApi, setResumeAnchorAfterApi] = useState(false);
@@ -211,6 +214,7 @@ export function StudioShell() {
   const stopRequested = useRef(false);
   const anchorUrl = useBlobUrl(anchor?.blob);
   const pendingAnchorUrl = useBlobUrl(pendingAnchorFile);
+  const pendingAnchorCandidateUrl = useBlobUrl(pendingAnchorCandidate);
   const connected = Boolean(connection?.apiKey);
 
   const active = workflowMap[activeId];
@@ -241,7 +245,15 @@ export function StudioShell() {
       setAnchor(storedAnchor);
       setArtworks(storedArtworks);
     });
-    if (hasTokenDanceAuthorizationCallback() && !oauthHandled.current) {
+    const hasOAuthCallback = hasTokenDanceAuthorizationCallback();
+    if (!hasOAuthCallback) {
+      try {
+        if (window.localStorage.getItem(ONBOARDING_STORAGE_KEY) !== "seen") setOnboardingOpen(true);
+      } catch {
+        setOnboardingOpen(true);
+      }
+    }
+    if (hasOAuthCallback && !oauthHandled.current) {
       oauthHandled.current = true;
       setApiOpen(true);
       setNotice("正在完成 TokenDance 授权…");
@@ -255,6 +267,15 @@ export function StudioShell() {
         })
         .catch((cause) => { setNotice(browserApiError(cause)); setApiAuthorizationMessage(`授权未完成：${browserApiError(cause)} 请在当前标签页重新授权。`); });
     }
+  }, []);
+
+  const closeOnboarding = useCallback(() => {
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "seen");
+    } catch {
+      // The guide still closes when private browsing blocks local storage.
+    }
+    setOnboardingOpen(false);
   }, []);
 
   useEffect(() => {
@@ -350,7 +371,7 @@ export function StudioShell() {
       setPendingAnchorFile(new File([sourceBlob], sourceName, { type: sourceBlob.type || "image/png" }));
       setPendingAnchorStyle(anchor.styleId || "original");
       setAnchorCreationMode("upload");
-      setPendingAnchorGenerated(false);
+      setPendingAnchorCandidate(undefined);
     } else if (!pendingAnchorFile) {
       setPendingAnchorStyle("original");
     }
@@ -361,7 +382,7 @@ export function StudioShell() {
     setNotice("");
     setAnchorCreationMode("create");
     setPendingAnchorFile(undefined);
-    setPendingAnchorGenerated(false);
+    setPendingAnchorCandidate(undefined);
     setPendingAnchorStyle("mengli");
     setAnchorOpen(true);
   }
@@ -386,14 +407,14 @@ export function StudioShell() {
     }
     setPendingAnchorFile(file);
     setAnchorCreationMode("upload");
-    setPendingAnchorGenerated(false);
+    setPendingAnchorCandidate(undefined);
     setPendingAnchorStyle("original");
     setNotice("图片已载入，请确认 IP 核心画风后再保存锚点。");
   }
 
   function chooseAnchorCreationMode(mode: "upload" | "create") {
     setAnchorCreationMode(mode);
-    setPendingAnchorGenerated(false);
+    setPendingAnchorCandidate(undefined);
     setNotice("");
     if (mode === "create") {
       setPendingAnchorFile(undefined);
@@ -416,14 +437,13 @@ export function StudioShell() {
     setStarterAnchorBrief(demo.brief);
     setPendingAnchorStyle(demo.styleId);
     setPendingAnchorFile(undefined);
-    setPendingAnchorGenerated(false);
+    setPendingAnchorCandidate(undefined);
     setNotice(`已填入“${demo.title}”示例，你可以继续修改任何细节。`);
   }
 
   function choosePendingAnchorStyle(styleId: AnchorStyleId) {
-    if (anchorCreationMode === "create" && pendingAnchorGenerated && styleId !== pendingAnchorStyle) {
-      setPendingAnchorFile(undefined);
-      setPendingAnchorGenerated(false);
+    if (pendingAnchorCandidate && styleId !== pendingAnchorStyle) {
+      setPendingAnchorCandidate(undefined);
       setNotice("核心画风已改变，请按新画风重新生成候选锚点。 ");
     }
     setPendingAnchorStyle(styleId);
@@ -443,9 +463,8 @@ export function StudioShell() {
     try {
       const blob = await generateBrowserStarterAnchor({ connection, brief: starterAnchorBrief, styleId, quality: "medium" });
       const file = new File([blob], `ip-anchor-${styleId}.png`, { type: blob.type || "image/png" });
-      setPendingAnchorFile(file);
+      setPendingAnchorCandidate(file);
       setPendingAnchorStyle(styleId);
-      setPendingAnchorGenerated(true);
       setNotice("候选锚点已生成。请先核对角色特征，满意后再确认；不满意可修改描述重新生成。 ");
     } catch (cause) {
       setNotice(browserApiError(cause));
@@ -454,39 +473,54 @@ export function StudioShell() {
     }
   }
 
-  async function confirmAnchorStyle() {
-    if (!pendingAnchorFile) return;
-    if (pendingAnchorStyle !== "original" && !connection) {
+  async function generateConvertedAnchorCandidate() {
+    if (!pendingAnchorFile || pendingAnchorStyle === "original") return;
+    if (!connection) {
       setResumeAnchorAfterApi(true);
       setAnchorOpen(false);
       setApiOpen(true);
+      setNotice("先连接一个支持参考图的生图模型，再回来转换锚点画风。 ");
       return;
     }
+    setAnchorConverting(true);
+    setNotice(`正在生成${getAnchorStylePreset(pendingAnchorStyle).label}候选，请保持页面在前台…`);
+    try {
+      const blob = await convertBrowserAnchor({
+        connection,
+        source: pendingAnchorFile,
+        styleId: pendingAnchorStyle,
+        quality: "medium",
+      });
+      const baseName = pendingAnchorFile.name.replace(/\.[^.]+$/, "") || "ip-anchor";
+      setPendingAnchorCandidate(new File([blob], `${baseName}-${pendingAnchorStyle}.png`, { type: blob.type || "image/png" }));
+      setNotice("转画风候选已生成。可以先放大检查或下载 PNG，满意后再确认为核心锚点。 ");
+    } catch (cause) {
+      setNotice(browserApiError(cause));
+    } finally {
+      setAnchorConverting(false);
+    }
+  }
+
+  async function confirmAnchorStyle() {
+    const sourceFile = pendingAnchorFile || pendingAnchorCandidate;
+    const acceptedFile = anchorCreationMode === "upload" && pendingAnchorStyle === "original" ? pendingAnchorFile : pendingAnchorCandidate;
+    if (!sourceFile || !acceptedFile) return;
 
     setAnchorConverting(true);
     try {
-      const acceptedBlob = pendingAnchorGenerated || pendingAnchorStyle === "original"
-        ? pendingAnchorFile
-        : await convertBrowserAnchor({
-            connection: connection!,
-            source: pendingAnchorFile,
-            styleId: pendingAnchorStyle,
-            quality: "medium",
-          });
-      const baseName = pendingAnchorFile.name.replace(/\.[^.]+$/, "") || "ip-anchor";
       const record: AnchorRecord = {
         id: "primary",
-        name: pendingAnchorGenerated || pendingAnchorStyle === "original" ? pendingAnchorFile.name : `${baseName}-${pendingAnchorStyle}.png`,
-        blob: acceptedBlob,
-        sourceName: pendingAnchorFile.name,
-        sourceBlob: pendingAnchorFile,
+        name: acceptedFile.name,
+        blob: acceptedFile,
+        sourceName: sourceFile.name,
+        sourceBlob: sourceFile,
         styleId: pendingAnchorStyle,
         updatedAt: Date.now(),
       };
       await saveAnchor(record);
       setAnchor(record);
       setPendingAnchorFile(undefined);
-      setPendingAnchorGenerated(false);
+      setPendingAnchorCandidate(undefined);
       setAnchorCreationMode("upload");
       setNotice(`${getAnchorStylePreset(pendingAnchorStyle).label}已确认为 IP 核心画风，之后默认沿用。`);
       setAnchorOpen(false);
@@ -501,7 +535,7 @@ export function StudioShell() {
     await removeAnchor();
     setAnchor(undefined);
     setPendingAnchorFile(undefined);
-    setPendingAnchorGenerated(false);
+    setPendingAnchorCandidate(undefined);
     setPendingAnchorStyle("original");
     setNotice("已移除本机角色锚点。");
   }
@@ -820,6 +854,9 @@ export function StudioShell() {
           <button className="menu-button" onClick={() => setMobileNav(true)} aria-label="打开菜单"><Menu /></button>
           <div className="topbar-note"><Sparkles size={16} /><span>一个角色，长出整个内容世界。</span></div>
           <div className="topbar-actions">
+            <button className="quiet-button onboarding-trigger" onClick={() => setOnboardingOpen(true)} aria-label="打开新手引导">
+              <CircleHelp size={17} /><span>新手引导</span>
+            </button>
             <button className="quiet-button" onClick={() => setView(view === "studio" ? "gallery" : "studio")}>
               {view === "studio" ? <GalleryHorizontalEnd size={17} /> : <LayoutDashboard size={17} />}
               <span>{view === "studio" ? "我的作品" : "回创作间"}</span>
@@ -1092,13 +1129,13 @@ export function StudioShell() {
                 <div className="starter-demo-grid">
                   {STARTER_ANCHOR_DEMOS.map((demo, index) => <button type="button" onClick={() => chooseStarterDemo(index)} disabled={anchorConverting} key={demo.id}><img src={demo.preview} alt="" /><span><strong>{demo.title}</strong><small>{demo.description}</small></span></button>)}
                 </div>
-<label className="starter-brief"><span>描述你的第一版角色</span><textarea disabled={anchorConverting} value={starterAnchorBrief} maxLength={1200} placeholder="例如：蓝色短发、圆眼睛、黑色卫衣、黄色运动鞋，随身带一本笔记本，安静但有好奇心……" onChange={(event) => { setStarterAnchorBrief(event.target.value); if (pendingAnchorGenerated) { setPendingAnchorGenerated(false); setPendingAnchorFile(undefined); } }} /><small>{starterAnchorBrief.length}/1200 · 至少写清发型或物种、服装、配色与一个记忆点</small></label>
-                {pendingAnchorUrl && <div className="starter-candidate"><button type="button" className="starter-candidate-image image-preview-trigger" onClick={() => setImagePreview({ src: pendingAnchorUrl, title: "待确认的角色锚点" })} aria-label="放大预览待确认的角色锚点" title="点击放大预览"><img src={pendingAnchorUrl} alt="AI 生成的待确认角色锚点" /></button><span><strong>这是候选，不会自动覆盖当前角色</strong><small>点击图片放大检查发型、服装、手脚与标志物，再决定是否确认。</small><button type="button" onClick={() => void generateStarterAnchorCandidate()} disabled={anchorConverting}>修改描述后重新生成</button></span></div>}
+<label className="starter-brief"><span>描述你的第一版角色</span><textarea disabled={anchorConverting} value={starterAnchorBrief} maxLength={1200} placeholder="例如：蓝色短发、圆眼睛、黑色卫衣、黄色运动鞋，随身带一本笔记本，安静但有好奇心……" onChange={(event) => { setStarterAnchorBrief(event.target.value); if (pendingAnchorCandidate) setPendingAnchorCandidate(undefined); }} /><small>{starterAnchorBrief.length}/1200 · 至少写清发型或物种、服装、配色与一个记忆点</small></label>
                 <div className="starter-model-note"><Sparkles size={15} /><span><strong>推荐 Image 2 / gpt-image-2</strong><small>其他生图模型也可尝试，但角色细节、中文字形和透明度可能不同；模型必须支持文字生图。</small></span></div>
               </section>
             )}
 
             {(pendingAnchorFile || anchorCreationMode === "create") && <div className="anchor-style-section"><div className="anchor-style-heading"><span>选择 IP 核心画风</span><small>示例只展示画法，不提供角色身份</small></div><div className="anchor-style-grid">{ANCHOR_STYLE_PRESETS.filter((preset) => anchorCreationMode === "upload" || preset.id !== "original").map((preset) => { const preview = preset.id === "original" ? pendingAnchorUrl : preset.preview; return <button type="button" className={`anchor-style-option ${pendingAnchorStyle === preset.id ? "is-selected" : ""}`} onClick={() => choosePendingAnchorStyle(preset.id)} disabled={anchorConverting} key={preset.id}>{preview && <img src={preview} alt={`${preset.label}示例`} />}<span><strong>{preset.label}</strong><small>{preset.description}</small></span>{pendingAnchorStyle === preset.id && <Check size={16} />}</button>; })}</div></div>}
+            {pendingAnchorCandidateUrl && pendingAnchorCandidate && <div className="starter-candidate anchor-candidate"><button type="button" className="starter-candidate-image image-preview-trigger" onClick={() => setImagePreview({ src: pendingAnchorCandidateUrl, title: anchorCreationMode === "create" ? "待确认的基础锚点" : `待确认的${getAnchorStylePreset(pendingAnchorStyle).label}锚点` })} aria-label="放大预览待确认的锚点" title="点击放大预览"><img src={pendingAnchorCandidateUrl} alt="AI 生成的待确认锚点" /></button><span><strong>{anchorCreationMode === "create" ? "基础锚点候选已生成" : "转画风锚点候选已生成"}</strong><small>先放大检查发型、服装、手脚与标志物。下载不会自动覆盖当前角色。</small><span className="anchor-candidate-actions"><a href={pendingAnchorCandidateUrl} download={pendingAnchorCandidate.name}><Download size={14} /> 下载 PNG</a><button type="button" onClick={() => void (anchorCreationMode === "create" ? generateStarterAnchorCandidate() : generateConvertedAnchorCandidate())} disabled={anchorConverting}>重新生成</button></span></span></div>}
             {anchor && <div className="current-anchor-meta"><div><Check size={15} /><span><strong>当前：{anchorStyle.label}</strong><small>{new Date(anchor.updatedAt).toLocaleString("zh-CN")} 保存 · {anchor.name}</small></span></div><button onClick={() => void deleteAnchor()} disabled={anchorConverting}><Trash2 size={15} /> 移除</button></div>}
             <div className="anchor-style-lock">
               <ShieldCheck size={18} />
@@ -1106,7 +1143,7 @@ export function StudioShell() {
             </div>
             <div className="anchor-tips"><strong>更稳定的小诀窍</strong><span>完整头发或耳朵轮廓 · 标志性服装与配色 · 不要裁掉手脚 · 避免复杂场景</span></div>
             {notice && <div className="notice anchor-notice"><Sparkles size={15} /><span>{notice}</span></div>}
-            {anchorCreationMode === "create" ? <button className="modal-primary" onClick={() => pendingAnchorGenerated ? void confirmAnchorStyle() : void generateStarterAnchorCandidate()} disabled={anchorConverting || (!pendingAnchorGenerated && starterAnchorBrief.trim().length < 8)}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 正在生成角色候选，请保持前台</> : pendingAnchorGenerated ? "确认这张为核心锚点" : connected ? "生成角色锚点候选（消耗 1 张）" : "连接创作 API 后生成"}</button> : <button className="modal-primary" onClick={() => void confirmAnchorStyle()} disabled={!pendingAnchorFile || anchorConverting}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 图片模型正在转换并核对身份</> : !pendingAnchorFile ? "先上传一张身份原图" : pendingAnchorStyle === "original" ? "确认原图为核心锚点" : connected ? `转换为${getAnchorStylePreset(pendingAnchorStyle).label}并确认` : "连接创作 API 后转换"}</button>}
+            {anchorCreationMode === "create" ? <button className="modal-primary" onClick={() => pendingAnchorCandidate ? void confirmAnchorStyle() : void generateStarterAnchorCandidate()} disabled={anchorConverting || (!pendingAnchorCandidate && starterAnchorBrief.trim().length < 8)}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 正在生成角色候选，请保持前台</> : pendingAnchorCandidate ? "确认这张为核心锚点" : connected ? "生成角色锚点候选（消耗 1 张）" : "连接创作 API 后生成"}</button> : <button className="modal-primary" onClick={() => void (pendingAnchorStyle === "original" || pendingAnchorCandidate ? confirmAnchorStyle() : generateConvertedAnchorCandidate())} disabled={!pendingAnchorFile || anchorConverting}>{anchorConverting ? <><LoaderCircle className="spin" size={17} /> 正在生成转画风候选，请保持前台</> : !pendingAnchorFile ? "先上传一张身份原图" : pendingAnchorStyle === "original" ? "确认原图为核心锚点" : pendingAnchorCandidate ? "确认候选为核心锚点" : connected ? `生成${getAnchorStylePreset(pendingAnchorStyle).label}候选（消耗 1 张）` : "连接创作 API 后转换"}</button>}
           </div>
         </div>
       )}
@@ -1119,6 +1156,7 @@ export function StudioShell() {
           </figure>
         </div>
       )}
+      <FirstVisitOnboarding open={onboardingOpen} onClose={closeOnboarding} />
     </div>
   );
 }
