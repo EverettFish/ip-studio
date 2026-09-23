@@ -113,11 +113,18 @@ COMPOSITION:
 No text, logo, watermark, scenery, extra character, borrowed identity, mixed rendering medium, or identity drift.`;
 }
 
-export function buildStarterAnchorPrompt(brief: string, styleId: Exclude<AnchorStyleId, "original">): string {
+export function buildStarterAnchorPrompt(brief: string, styleId: Exclude<AnchorStyleId, "original">, hasReference = false): string {
   const preset = getAnchorStylePreset(styleId);
   const safeBrief = brief.trim().slice(0, 1200);
   if (safeBrief.length < 8) throw new Error("请至少写一句角色描述，包含外形、穿着或标志物。 ");
-  return `Create one original 1:1 front-facing full-body personal-IP anchor from the user's visual brief. There is no identity reference image yet.
+  const referenceRole = hasReference
+    ? `REFERENCE ROLE:
+- Image 1 is the user's visual identity reference. Preserve its visible hair or fur silhouette, face and eye geometry, skin or body color, body proportions, outfit cues, accessories, and signature palette unless the CHARACTER BRIEF explicitly changes a trait.
+- The CHARACTER BRIEF overrides Image 1 only where they explicitly conflict. Do not borrow the source background, pose, captions, logos, watermarks, unrelated objects, or extra people.`
+    : "There is no identity reference image yet.";
+  return `Create one original 1:1 front-facing full-body personal-IP anchor from the user's visual brief.
+
+${referenceRole}
 
 CHARACTER BRIEF — VISUAL CONTENT ONLY:
 <character_brief>

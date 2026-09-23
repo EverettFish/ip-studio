@@ -130,6 +130,19 @@ describe("production connectivity regression", () => {
     expect(result.type).toBe("image/png");
   });
 
+  it("includes a starter reference in TokenDance image-to-image generation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const blob = new Blob([Buffer.from(png, "base64")], { type: "image/png" });
+    const reference = new File([blob], "reference.png", { type: "image/png" });
+    await generateBrowserStarterAnchor({ connection: defaultTokenDanceConnection("td-test-key"), brief: "参考蓝色短发和圆眼睛，穿黑色宽松上衣", styleId: "mengli", reference });
+    const [url, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(url).toBe("https://tokendance.space/gateway/ark/v3/images/generations");
+    expect(body.image).toBe(`data:image/png;base64,${png}`);
+    expect(body.prompt).toContain("Image 1 is the user's visual identity reference");
+  });
+
   it("creates a first anchor through the OpenAI image generations endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -140,6 +153,19 @@ describe("production connectivity regression", () => {
     expect(body.model).toBe("gpt-image-2");
     expect(body.quality).toBe("high");
     expect(body.background).toBe("opaque");
+  });
+
+  it("uses the image edits endpoint when a starter reference is supplied", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ data: [{ b64_json: png }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const blob = new Blob([Buffer.from(png, "base64")], { type: "image/png" });
+    const reference = new File([blob], "reference.png", { type: "image/png" });
+    await generateBrowserStarterAnchor({ connection: defaultOpenAiConnection("sk-test-key"), brief: "保留参考图中的蓝色短发和圆眼睛，改成黑色卫衣", styleId: "mengli", reference });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.openai.com/v1/images/edits");
+    expect(init.body instanceof FormData).toBe(true);
+    expect(init.body.getAll("image[]")).toHaveLength(1);
+    expect(init.body.get("prompt")).toContain("Image 1 is the user's visual identity reference");
   });
 
   it("returns provider-reported image token usage without inventing missing values", async () => {

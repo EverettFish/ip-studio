@@ -28,6 +28,13 @@ describe("anchor style presets", () => {
     expect(prompt).not.toContain("Image 1 is the only identity source");
   });
 
+  it("assigns an uploaded starter reference a clear identity role", () => {
+    const prompt = buildStarterAnchorPrompt(STARTER_ANCHOR_DEMOS[0].brief, "mengli", true);
+    expect(prompt).toContain("Image 1 is the user's visual identity reference");
+    expect(prompt).toContain("CHARACTER BRIEF overrides Image 1 only where they explicitly conflict");
+    expect(prompt).not.toContain("There is no identity reference image yet");
+  });
+
   it("requires a meaningful starter description", () => {
     expect(() => buildStarterAnchorPrompt("蓝发", "flat")).toThrow(/至少写一句/);
   });

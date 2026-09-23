@@ -161,12 +161,15 @@ export async function generateBrowserStarterAnchor(args: {
   brief: string;
   styleId: Exclude<AnchorStyleId, "original">;
   quality?: "low" | "medium" | "high";
+  reference?: File;
 }): Promise<Blob> {
   assertImageModel(args.connection.imageModel);
-  const prompt = buildStarterAnchorPrompt(args.brief, args.styleId);
+  const reference = args.reference ? await checkedFile(args.reference) : undefined;
+  const prompt = buildStarterAnchorPrompt(args.brief, args.styleId, Boolean(reference));
   if (args.connection.imageProtocol === "ark-generations") {
-    return generateArkImage(args.connection, [], prompt, "1024x1024");
+    return generateArkImage(args.connection, reference ? [reference] : [], prompt, "1024x1024");
   }
+  if (reference) return generateOpenAiImage(args.connection, [reference], prompt, "1024x1024", args.quality ?? "medium", "opaque");
   return generateOpenAiTextImage(args.connection, prompt, args.quality ?? "medium");
 }
 
